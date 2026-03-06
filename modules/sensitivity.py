@@ -1,6 +1,6 @@
 """
 Sensitivity analysis: how the earliest retirement age changes as a function
-of ETF return and monthly expenses.
+of monthly PAC and monthly expenses.
 """
 from typing import Any, Dict, Optional
 import pandas as pd
@@ -9,7 +9,7 @@ from .fire_analysis import find_earliest_retirement
 from .pension_state import calculate_state_pension
 
 
-RETURN_DELTAS = (-0.02, -0.01, 0.0, 0.01, 0.02)
+PAC_DELTAS     = (-0.20, -0.10, 0.0, 0.10, 0.20)
 EXPENSE_DELTAS = (-0.20, -0.10, 0.0, 0.10, 0.20)
 
 
@@ -53,13 +53,13 @@ def run_sensitivity(
     couple_stop_working_age: int = 0,
     early_pension_years: int = 0,
     defer_to_71: bool = False,
-    return_deltas: tuple = RETURN_DELTAS,
+    pac_deltas: tuple = PAC_DELTAS,
     expense_deltas: tuple = EXPENSE_DELTAS,
 ) -> pd.DataFrame:
     """
     Run a 5×5 sensitivity grid.
     Rows  = expense variation (%) — index
-    Cols  = ETF net return variation (pp) — columns
+    Cols  = monthly PAC variation (%) — columns
     Values = earliest retirement age
     """
     results = {}
@@ -69,9 +69,9 @@ def run_sensitivity(
         row = {}
         monthly_exp = base_monthly_expenses * (1 + exp_delta)
 
-        for ret_delta in return_deltas:
-            ret_label = f"{ret_delta:+.1%}"
-            etf_ret = base_etf_net_return + ret_delta
+        for pac_delta in pac_deltas:
+            pac_label = f"{pac_delta:+.0%}"
+            pac = monthly_pac * (1 + pac_delta)
 
             earliest = find_earliest_retirement(
                 current_age=current_age,
@@ -80,8 +80,8 @@ def run_sensitivity(
                 monthly_expenses=monthly_exp,
                 age_started_working=age_started_working,
                 etf_value=etf_value,
-                monthly_pac=monthly_pac,
-                etf_net_return=etf_ret,
+                monthly_pac=pac,
+                etf_net_return=base_etf_net_return,
                 capital_gains_tax=capital_gains_tax,
                 bank_balance=bank_balance,
                 bank_interest=bank_interest,
@@ -114,11 +114,11 @@ def run_sensitivity(
                 early_pension_years=early_pension_years,
                 defer_to_71=defer_to_71,
             )
-            row[ret_label] = earliest
+            row[pac_label] = earliest
 
         results[exp_label] = row
 
     df = pd.DataFrame(results).T
     df.index.name = "Expenses Δ"
-    df.columns.name = "ETF Return Δ"
+    df.columns.name = "PAC Δ"
     return df

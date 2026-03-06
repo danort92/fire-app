@@ -940,7 +940,7 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
 def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
     st.header("🔬 Sensitivity Analysis")
     st.caption(
-        "Shows how the **earliest retirement age** changes as ETF return (columns) "
+        "Shows how the **earliest retirement age** changes as monthly PAC (columns) "
         "and monthly expenses (rows) vary around your base values."
     )
 
@@ -989,7 +989,7 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
         y=df_sens.index.tolist(),
         color_continuous_scale="RdYlGn_r",
         text_auto=True,
-        labels={"x": "ETF Return Δ", "y": "Expenses Δ", "color": "Retirement Age"},
+        labels={"x": "PAC Δ", "y": "Expenses Δ", "color": "Retirement Age"},
         title="Earliest retirement age (lower = better)",
         aspect="auto",
     )
@@ -1000,15 +1000,15 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
     st.dataframe(df_sens, use_container_width=True)
 
     # Key insights
-    base_val = df_sens.loc["0%", "0.0%"] if "0%" in df_sens.index and "0.0%" in df_sens.columns else None
+    base_val = df_sens.loc["0%", "0%"] if "0%" in df_sens.index and "0%" in df_sens.columns else None
     if base_val is not None:
         best_case = df_sens.values.min()
         worst_case = df_sens.values.max()
         bc1, bc2, bc3 = st.columns(3)
         bc1.metric("Base case", f"{int(base_val)} yrs")
-        bc2.metric("Best case (high return, low exp.)", f"{int(best_case)} yrs",
+        bc2.metric("Best case (high PAC, low exp.)", f"{int(best_case)} yrs",
                     delta=f"{int(best_case) - int(base_val)} yrs")
-        bc3.metric("Worst case (low return, high exp.)", f"{int(worst_case)} yrs",
+        bc3.metric("Worst case (low PAC, high exp.)", f"{int(worst_case)} yrs",
                     delta=f"{int(worst_case) - int(base_val)} yrs")
 
 

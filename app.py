@@ -23,7 +23,7 @@ from modules.projections import run_projection
 from modules.fire_analysis import run_your_scenario, find_earliest_retirement, find_optimal_pac
 from modules.npv_comparison import calculate_npv_comparison
 from modules.monte_carlo import run_monte_carlo, SCENARIO_OPTIONS
-from modules.sensitivity import run_sensitivity
+from modules.sensitivity import run_sensitivity, AXIS_VARIABLES, OUTPUT_METRICS
 
 # ─────────────────────────────────────────────
 # Page config
@@ -939,16 +939,28 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
 # ─────────────────────────────────────────────
 def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
     st.header("🔬 Sensitivity Analysis")
+
+    axis_options = list(AXIS_VARIABLES.keys())
+
+    sc1, sc2, sc3 = st.columns(3)
+    output_metric = sc1.selectbox("Metrica output", OUTPUT_METRICS, index=0)
+    y_var = sc2.selectbox("Variabile Y (righe)", axis_options,
+                          index=axis_options.index("Spese mensili"))
+    x_default = "Rendimento ETF netto" if y_var != "Rendimento ETF netto" else "Spese mensili"
+    x_options = [v for v in axis_options if v != y_var]
+    x_var = sc3.selectbox("Variabile X (colonne)", x_options,
+                          index=x_options.index(x_default) if x_default in x_options else 0)
+
     st.caption(
-        "Shows how the **earliest retirement age** changes as ETF return (columns) "
-        "and monthly expenses (rows) vary around your base values."
+        f"Mostra come **{output_metric.lower()}** varia al variare di "
+        f"**{x_var}** (colonne) e **{y_var}** (righe) intorno ai valori base."
     )
 
     etf_net_return = p["expected_gross_return"] - p["ter"] - p["ivafe"]
     tfr_to_fund = p["tfr_contribution"] if p.get("tfr_destination", "fund") == "fund" else 0.0
     total_annual_contribution = tfr_to_fund + p["employer_contribution"] + p["personal_contribution"]
 
-    with st.spinner("Running 25 sensitivity scenarios..."):
+    with st.spinner("Calcolo 25 scenari..."):
         df_sens = _cached_sensitivity(
             base_etf_net_return=etf_net_return,
             base_monthly_expenses=monthly_expenses,
@@ -970,6 +982,7 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
             ral=p["ral"], ral_growth=p["ral_growth"],
             inps_contribution_rate=p["inps_contribution_rate"],
             gdp_revaluation_rate=p["gdp_revaluation_rate"],
+            stop_working_age=p["stop_working_age"],
             part_time_monthly_gross=p.get("part_time_monthly_gross", 0.0),
             inps_employee_rate=p["inps_employee_rate"],
             surcharges_rate=p["surcharges_rate"],
@@ -980,36 +993,51 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
             couple_stop_working_age=p.get("couple_stop_working_age", 0),
             early_pension_years=p.get("early_pension_years", 0),
             defer_to_71=p.get("defer_to_71", False),
+            x_var=x_var,
+            y_var=y_var,
+            output_metric=output_metric,
         )
 
-    # Heatmap
+    # Heatmap config depends on metric
+    is_age_metric = output_metric == "Età minima di pensionamento"
+    color_scale  = "RdYlGn_r" if is_age_metric else "RdYlGn"
+    color_label  = "Età (anni)" if is_age_metric else "Portafoglio (€k)"
+    better_note  = "minore = meglio" if is_age_metric else "maggiore = meglio"
+
     fig_heat = px.imshow(
         df_sens.values,
         x=df_sens.columns.tolist(),
         y=df_sens.index.tolist(),
-        color_continuous_scale="RdYlGn_r",
+        color_continuous_scale=color_scale,
         text_auto=True,
-        labels={"x": "ETF Return Δ", "y": "Expenses Δ", "color": "Retirement Age"},
-        title="Earliest retirement age (lower = better)",
+        labels={"x": x_var, "y": y_var, "color": color_label},
+        title=f"{output_metric} ({better_note})",
         aspect="auto",
     )
     fig_heat.update_layout(template="plotly_dark", height=420)
     st.plotly_chart(fig_heat, use_container_width=True)
 
-    st.subheader("Table")
+    st.subheader("Tabella")
     st.dataframe(df_sens, use_container_width=True)
 
-    # Key insights
-    base_val = df_sens.loc["0%", "0.0%"] if "0%" in df_sens.index and "0.0%" in df_sens.columns else None
+    # Key metrics — find the base cell (delta = 0 for both axes)
+    x_zero = AXIS_VARIABLES[x_var]["label_fmt"].format(0.0)
+    y_zero = AXIS_VARIABLES[y_var]["label_fmt"].format(0.0)
+    base_val = df_sens.loc[y_zero, x_zero] if y_zero in df_sens.index and x_zero in df_sens.columns else None
     if base_val is not None:
-        best_case = df_sens.values.min()
-        worst_case = df_sens.values.max()
+        if is_age_metric:
+            best_case  = int(df_sens.values.min())
+            worst_case = int(df_sens.values.max())
+            fmt = lambda v: f"{v} anni"
+        else:
+            best_case  = int(df_sens.values.max())
+            worst_case = int(df_sens.values.min())
+            fmt = lambda v: f"€{v}k"
+        base_val = int(base_val)
         bc1, bc2, bc3 = st.columns(3)
-        bc1.metric("Base case", f"{int(base_val)} yrs")
-        bc2.metric("Best case (high return, low exp.)", f"{int(best_case)} yrs",
-                    delta=f"{int(best_case) - int(base_val)} yrs")
-        bc3.metric("Worst case (low return, high exp.)", f"{int(worst_case)} yrs",
-                    delta=f"{int(worst_case) - int(base_val)} yrs")
+        bc1.metric("Base case", fmt(base_val))
+        bc2.metric("Caso migliore", fmt(best_case),  delta=f"{best_case  - base_val:+d}")
+        bc3.metric("Caso peggiore", fmt(worst_case), delta=f"{worst_case - base_val:+d}")
 
 
 # ─────────────────────────────────────────────

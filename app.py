@@ -845,116 +845,8 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
 
 
 # ─────────────────────────────────────────────
-# Tab 6: Monte Carlo
 # ─────────────────────────────────────────────
-def tab_monte_carlo(p, net_monthly_salary, monthly_expenses, pension_info):
-    st.header("🎲 Monte Carlo Simulation")
-    st.caption(f"Scenario: **{p['mc_scenario']}** | Simulations: **{p['n_simulations']}**")
-
-    etf_net_return = p["expected_gross_return"] - p["ter"] - p["ivafe"]
-    tfr_to_fund = p["tfr_contribution"] if p.get("tfr_destination", "fund") == "fund" else 0.0
-    total_annual_contribution = tfr_to_fund + p["employer_contribution"] + p["personal_contribution"]
-
-    with st.spinner(f"Running {p['n_simulations']} simulations..."):
-        mc_result = _cached_monte_carlo(
-            n_simulations=p["n_simulations"],
-            current_age=p["current_age"], target_age=p["target_age"],
-            net_monthly_salary=float(net_monthly_salary),
-            monthly_expenses=monthly_expenses,
-            age_started_working=p["age_started_working"],
-            etf_value=p["etf_value"], monthly_pac=p["monthly_pac"],
-            etf_net_return=etf_net_return,
-            expected_gross_return=p["expected_gross_return"],
-            etf_volatility=p["etf_volatility"],
-            ter=p["ter"], ivafe=p["ivafe"],
-            capital_gains_tax=p["capital_gains_tax"],
-            bank_balance=p["bank_balance"], bank_interest=p["bank_interest"],
-            emergency_fund=p["emergency_fund"], stamp_duty=p["stamp_duty"],
-            pension_fund_value=p["pf_value"],
-            total_annual_contribution=total_annual_contribution,
-            voluntary_extra=p["voluntary_extra"],
-            pension_fund_return=p["fund_return"],
-            annuity_rate=p["annuity_rate"], age_joined_fund=p["age_joined_fund"],
-            stop_working_age=p["stop_working_age"],
-            part_time=p["part_time"], part_time_salary=p["part_time_salary"],
-            part_time_until_age=p["part_time_until_age"],
-            inflation=p["inflation"], inflation_std=p["inflation_std"],
-            state_pension_annual_net=pension_info["net_annual_nominal"] if pension_info["eligible"] else 0.0,
-            pension_start_age=pension_info["pension_age"],
-            contribution_years=pension_info["contribution_years"],
-            scenario=p["mc_scenario"],
-            part_time_monthly_gross=p.get("part_time_monthly_gross", 0.0),
-            inps_employee_rate=p["inps_employee_rate"],
-            surcharges_rate=p["surcharges_rate"],
-            tfr_destination=p.get("tfr_destination", "fund"),
-            tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
-            tfr_company_value=p.get("tfr_company_value", 0.0),
-            couple_net_monthly=p.get("couple_net_monthly", 0.0),
-            couple_stop_working_age=p.get("couple_stop_working_age", 0),
-        )
-
-    pct = mc_result["percentiles"]
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Solvency probability", f"{mc_result['probability_solvent'] * 100:.1f}%")
-    col2.metric("Avg age of ruin (if occurs)", f"{mc_result['avg_broke_age']:.1f} yrs")
-    col3.metric(f"Median wealth (P50) at {p['target_age']}", fmt_eur(pct["p50"][-1]))
-
-    ages = mc_result["ages"]
-    fig = go.Figure()
-    bands = [
-        ("p5",  "p95", "rgba(99,110,250,0.10)", "P5–P95"),
-        ("p10", "p90", "rgba(99,110,250,0.20)", "P10–P90"),
-        ("p25", "p75", "rgba(99,110,250,0.35)", "P25–P75"),
-    ]
-    for lo, hi, color, name in bands:
-        fig.add_trace(go.Scatter(
-            x=ages + ages[::-1],
-            y=pct[hi] + pct[lo][::-1],
-            fill="toself", fillcolor=color,
-            line=dict(color="rgba(0,0,0,0)"),
-            name=name,
-        ))
-    fig.add_trace(go.Scatter(x=ages, y=pct["p50"], name="Median (P50)",
-                              line=dict(color="#636EFA", width=2)))
-    fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Wealth = 0")
-    fig.add_vline(x=p["stop_working_age"], line_dash="dash", line_color="orange",
-                  annotation_text=f"Retirement {p['stop_working_age']}")
-    fig.update_layout(
-        title="Monte Carlo: Real Liquid Wealth (Bank + ETF)",
-        xaxis_title="Age", yaxis_title="€ real",
-        template="plotly_dark", hovermode="x unified", height=500,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader(f"Terminal wealth distribution (age {p['target_age']})")
-    fig_hist = px.histogram(
-        x=mc_result["terminal_wealth"], nbins=50,
-        labels={"x": "Real wealth (€)", "y": "Simulations"},
-        color_discrete_sequence=["#636EFA"],
-        title=f"Distribution of real wealth at age {p['target_age']}",
-    )
-    fig_hist.add_vline(x=0, line_dash="dash", line_color="red")
-    fig_hist.update_layout(template="plotly_dark", height=350)
-    st.plotly_chart(fig_hist, use_container_width=True)
-
-    st.subheader("Wealth percentiles at key ages")
-    key_ages = sorted(set(a for a in [
-        p["current_age"], p["stop_working_age"], 60, pension_info["pension_age"], p["target_age"]
-    ] if p["current_age"] <= a <= p["target_age"]))
-    pct_table = [{
-        "Age": ka,
-        "P5": fmt_eur(pct["p5"][ages.index(ka)]),
-        "P25": fmt_eur(pct["p25"][ages.index(ka)]),
-        "P50": fmt_eur(pct["p50"][ages.index(ka)]),
-        "P75": fmt_eur(pct["p75"][ages.index(ka)]),
-        "P95": fmt_eur(pct["p95"][ages.index(ka)]),
-    } for ka in key_ages if ka in ages]
-    if pct_table:
-        st.dataframe(pd.DataFrame(pct_table), use_container_width=True, hide_index=True)
-
-
-# ─────────────────────────────────────────────
-# Tab 7: Summary Dashboard
+# Tab 6: Summary Dashboard
 # ─────────────────────────────────────────────
 def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
     st.header("📋 Summary Dashboard")
@@ -1183,11 +1075,349 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
 
 
 # ─────────────────────────────────────────────
-# Tab 9: Scenario Comparison
+# Tab 8: Scenarios & Monte Carlo (unified)
 # ─────────────────────────────────────────────
-def tab_scenario_comparison(p, net_monthly_salary, monthly_expenses, pension_info):
-    st.header("📊 Scenario Comparison")
-    st.caption("Compare three different retirement strategies side by side.")
+def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):
+    st.header("📊 Scenari & Monte Carlo")
+    st.caption("Confronta tre strategie, poi verifica la robustezza stocastica con Monte Carlo.")
+
+    etf_net_return = p["expected_gross_return"] - p["ter"] - p["ivafe"]
+    tfr_to_fund = p["tfr_contribution"] if p.get("tfr_destination", "fund") == "fund" else 0.0
+    total_annual_contribution = tfr_to_fund + p["employer_contribution"] + p["personal_contribution"]
+
+    _base = dict(
+        current_age=p["current_age"], target_age=p["target_age"],
+        net_monthly_salary=float(net_monthly_salary), monthly_expenses=monthly_expenses,
+        age_started_working=p["age_started_working"],
+        etf_value=p["etf_value"], etf_net_return=etf_net_return,
+        capital_gains_tax=p["capital_gains_tax"],
+        bank_balance=p["bank_balance"], bank_interest=p["bank_interest"],
+        emergency_fund=p["emergency_fund"], stamp_duty=p["stamp_duty"],
+        pension_fund_value=p["pf_value"],
+        total_annual_contribution=total_annual_contribution,
+        voluntary_extra=p["voluntary_extra"], pension_fund_return=p["fund_return"],
+        annuity_rate=p["annuity_rate"], age_joined_fund=p["age_joined_fund"],
+        part_time=p["part_time"], part_time_salary=p["part_time_salary"],
+        part_time_until_age=p["part_time_until_age"], inflation=p["inflation"],
+        part_time_monthly_gross=p.get("part_time_monthly_gross", 0.0),
+        inps_employee_rate=p["inps_employee_rate"], surcharges_rate=p["surcharges_rate"],
+        tfr_destination=p.get("tfr_destination", "fund"),
+        tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
+        tfr_company_value=p.get("tfr_company_value", 0.0),
+        couple_net_monthly=p.get("couple_net_monthly", 0.0),
+        couple_stop_working_age=p.get("couple_stop_working_age", 0),
+    )
+
+    # ── Scenario definitions ──────────────────────────────────────────────
+    st.subheader("Definisci i 3 scenari")
+    base_etf = p["expected_gross_return"] - p["ter"] - p["ivafe"]
+
+    scol1, scol2, scol3 = st.columns(3)
+
+    with scol1:
+        st.markdown("**Scenario A**")
+        a_name    = st.text_input("Name A", "Conservativo (ritiro tardivo)", key="sc_a_name")
+        a_retire  = st.number_input("Retire age", p["current_age"] + 1, 70,
+                        min(65, p["stop_working_age"] + 5), key="sc_a_retire")
+        a_pac     = st.number_input("Monthly PAC (€)", 0, 10_000, int(p["monthly_pac"]), step=50, key="sc_a_pac")
+        a_exp     = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="sc_a_exp")
+        a_etf     = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="sc_a_etf") / 100
+        a_infl    = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="sc_a_infl") / 100
+        a_ral     = st.number_input("Annual gross salary RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="sc_a_ral")
+
+    with scol2:
+        st.markdown("**Scenario B** (Base)")
+        b_name    = st.text_input("Name B", "Base scenario", key="sc_b_name")
+        b_retire  = st.number_input("Retire age", p["current_age"] + 1, 70,
+                        p["stop_working_age"], key="sc_b_retire")
+        b_pac     = st.number_input("Monthly PAC (€)", 0, 10_000, int(p["monthly_pac"]), step=50, key="sc_b_pac")
+        b_exp     = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="sc_b_exp")
+        b_etf     = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="sc_b_etf") / 100
+        b_infl    = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="sc_b_infl") / 100
+        b_ral     = st.number_input("Annual gross salary RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="sc_b_ral")
+
+    with scol3:
+        st.markdown("**Scenario C**")
+        c_name    = st.text_input("Name C", "Aggressivo (ritiro anticipato)", key="sc_c_name")
+        c_retire  = st.number_input("Retire age", p["current_age"] + 1, 70,
+                        max(p["current_age"] + 1, p["stop_working_age"] - 5), key="sc_c_retire")
+        c_pac     = st.number_input("Monthly PAC (€)", 0, 10_000,
+                        min(10_000, int(p["monthly_pac"]) + 200), step=50, key="sc_c_pac")
+        c_exp     = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="sc_c_exp")
+        c_etf     = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="sc_c_etf") / 100
+        c_infl    = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="sc_c_infl") / 100
+        c_ral     = st.number_input("Annual gross salary RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="sc_c_ral")
+
+    scenarios = [
+        (a_name, a_retire, a_pac, a_exp, a_etf, a_infl, a_ral),
+        (b_name, b_retire, b_pac, b_exp, b_etf, b_infl, b_ral),
+        (c_name, c_retire, c_pac, c_exp, c_etf, c_infl, c_ral),
+    ]
+
+    with st.spinner("Calcolo 3 scenari deterministici..."):
+        results = []
+        for name, retire_age, pac, sc_exp, sc_etf, sc_infl, sc_ral in scenarios:
+            p_info = calculate_state_pension(
+                ral=sc_ral, ral_growth=p["ral_growth"],
+                inps_contribution_rate=p["inps_contribution_rate"],
+                gdp_revaluation_rate=p["gdp_revaluation_rate"],
+                current_age=p["current_age"], age_started_working=p["age_started_working"],
+                stop_working_age=retire_age, part_time=p["part_time"],
+                part_time_salary=p["part_time_salary"],
+                part_time_until_age=p["part_time_until_age"],
+                net_monthly_salary=float(net_monthly_salary),
+                age_joined_fund=p["age_joined_fund"],
+                part_time_monthly_gross=p.get("part_time_monthly_gross", 0.0),
+                early_pension_years=p.get("early_pension_years", 0),
+                defer_to_71=p.get("defer_to_71", False),
+                base_vecchiaia_age=p.get("vecchiaia_age", 67),
+            )
+            sc_base = {**_base,
+                       "monthly_expenses": sc_exp,
+                       "etf_net_return": sc_etf,
+                       "inflation": sc_infl,
+                       "ral": sc_ral}
+            rs = run_your_scenario(
+                monthly_pac=pac,
+                stop_working_age=retire_age,
+                state_pension_annual_net=p_info["net_annual_nominal"] if p_info["eligible"] else 0.0,
+                pension_start_age=p_info["pension_age"],
+                contribution_years=p_info["contribution_years"],
+                **sc_base,
+            )
+            results.append({
+                "name": name,
+                "retire_age": retire_age,
+                "pac": pac,
+                "expenses": sc_exp,
+                "etf": sc_etf,
+                "inflation": sc_infl,
+                "ral": sc_ral,
+                "pension_age": p_info["pension_age"],
+                "pension_net": p_info["net_annual_nominal"] if p_info["eligible"] else 0,
+                "contribution_years": p_info["contribution_years"],
+                "rows": rs["rows"],
+                "solvent": rs["solvent_to_target"],
+                "final_wealth": rs["assets_at_target_real"],
+            })
+
+    # ── Key metrics ───────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Metriche chiave")
+    cols = st.columns(3)
+    for res, col in zip(results, cols):
+        with col:
+            status = "✅ Solvent" if res["solvent"] else "❌ Broke"
+            st.markdown(f"**{res['name']}**")
+            st.metric("Retire age", res["retire_age"])
+            st.metric("Monthly PAC", fmt_eur(res["pac"]))
+            st.metric("Monthly expenses", fmt_eur(res["expenses"]))
+            st.metric("ETF net return", fmt_pct(res["etf"]))
+            st.metric("Inflation", fmt_pct(res["inflation"]))
+            st.metric("RAL", fmt_eur(res["ral"]))
+            st.metric("Status", status)
+            st.metric(f"Real wealth at {p['target_age']}", fmt_eur(res["final_wealth"]))
+            st.metric("State pension age", res["pension_age"])
+            st.metric("State pension/year", fmt_eur(res["pension_net"]))
+
+    # ── Deterministic wealth chart ────────────────────────────────────────
+    st.subheader("Evoluzione del patrimonio — deterministico")
+    colors_sc = ["#EF553B", "#636EFA", "#00CC96"]
+    fig_cmp = go.Figure()
+    for res, color in zip(results, colors_sc):
+        ages_sc = [r["age"] for r in res["rows"]]
+        totals_sc = [r["total_real"] for r in res["rows"]]
+        fig_cmp.add_trace(go.Scatter(
+            x=ages_sc, y=totals_sc,
+            name=res["name"],
+            line=dict(color=color, width=2),
+        ))
+    fig_cmp.add_hline(y=0, line_dash="dash", line_color="white")
+    fig_cmp.update_layout(
+        title="Patrimonio reale totale nel tempo — 3 scenari",
+        xaxis_title="Età", yaxis_title="€ reali",
+        template="plotly_dark", hovermode="x unified", height=450,
+    )
+    st.plotly_chart(fig_cmp, use_container_width=True)
+
+    # ── Monte Carlo — parametri base ─────────────────────────────────────
+    st.divider()
+    st.subheader("🎲 Monte Carlo — parametri base")
+    st.caption(
+        f"Scenario: **{p['mc_scenario']}** | Simulazioni: **{p['n_simulations']}** · "
+        "Usa i parametri principali della sidebar, non quelli degli scenari sopra."
+    )
+
+    with st.spinner(f"Running {p['n_simulations']} simulations..."):
+        mc_result = _cached_monte_carlo(
+            n_simulations=p["n_simulations"],
+            current_age=p["current_age"], target_age=p["target_age"],
+            net_monthly_salary=float(net_monthly_salary),
+            monthly_expenses=monthly_expenses,
+            age_started_working=p["age_started_working"],
+            etf_value=p["etf_value"], monthly_pac=p["monthly_pac"],
+            etf_net_return=etf_net_return,
+            expected_gross_return=p["expected_gross_return"],
+            etf_volatility=p["etf_volatility"],
+            ter=p["ter"], ivafe=p["ivafe"],
+            capital_gains_tax=p["capital_gains_tax"],
+            bank_balance=p["bank_balance"], bank_interest=p["bank_interest"],
+            emergency_fund=p["emergency_fund"], stamp_duty=p["stamp_duty"],
+            pension_fund_value=p["pf_value"],
+            total_annual_contribution=total_annual_contribution,
+            voluntary_extra=p["voluntary_extra"],
+            pension_fund_return=p["fund_return"],
+            annuity_rate=p["annuity_rate"], age_joined_fund=p["age_joined_fund"],
+            stop_working_age=p["stop_working_age"],
+            part_time=p["part_time"], part_time_salary=p["part_time_salary"],
+            part_time_until_age=p["part_time_until_age"],
+            inflation=p["inflation"], inflation_std=p["inflation_std"],
+            state_pension_annual_net=pension_info["net_annual_nominal"] if pension_info["eligible"] else 0.0,
+            pension_start_age=pension_info["pension_age"],
+            contribution_years=pension_info["contribution_years"],
+            scenario=p["mc_scenario"],
+            part_time_monthly_gross=p.get("part_time_monthly_gross", 0.0),
+            inps_employee_rate=p["inps_employee_rate"],
+            surcharges_rate=p["surcharges_rate"],
+            tfr_destination=p.get("tfr_destination", "fund"),
+            tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
+            tfr_company_value=p.get("tfr_company_value", 0.0),
+            couple_net_monthly=p.get("couple_net_monthly", 0.0),
+            couple_stop_working_age=p.get("couple_stop_working_age", 0),
+        )
+
+    pct = mc_result["percentiles"]
+    mc1, mc2, mc3 = st.columns(3)
+    mc1.metric("Probabilità solvenza", f"{mc_result['probability_solvent'] * 100:.1f}%")
+    mc2.metric("Età media di rovina (se accade)", f"{mc_result['avg_broke_age']:.1f} anni")
+    mc3.metric(f"Patrimonio mediano (P50) a {p['target_age']}", fmt_eur(pct["p50"][-1]))
+
+    ages_mc = mc_result["ages"]
+    fig_mc = go.Figure()
+    bands = [
+        ("p5",  "p95", "rgba(99,110,250,0.10)", "P5–P95"),
+        ("p10", "p90", "rgba(99,110,250,0.20)", "P10–P90"),
+        ("p25", "p75", "rgba(99,110,250,0.35)", "P25–P75"),
+    ]
+    for lo, hi, color, bname in bands:
+        fig_mc.add_trace(go.Scatter(
+            x=ages_mc + ages_mc[::-1],
+            y=pct[hi] + pct[lo][::-1],
+            fill="toself", fillcolor=color,
+            line=dict(color="rgba(0,0,0,0)"),
+            name=bname,
+        ))
+    fig_mc.add_trace(go.Scatter(x=ages_mc, y=pct["p50"], name="Mediana (P50)",
+                                line=dict(color="#636EFA", width=2)))
+    fig_mc.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Patrimonio = 0")
+    fig_mc.add_vline(x=p["stop_working_age"], line_dash="dash", line_color="orange",
+                     annotation_text=f"Ritiro {p['stop_working_age']}")
+    fig_mc.update_layout(
+        title="Monte Carlo: Liquidità reale (Banca + ETF) — parametri base",
+        xaxis_title="Età", yaxis_title="€ reali",
+        template="plotly_dark", hovermode="x unified", height=500,
+    )
+    st.plotly_chart(fig_mc, use_container_width=True)
+
+    st.subheader(f"Distribuzione patrimonio terminale (età {p['target_age']})")
+    fig_hist = px.histogram(
+        x=mc_result["terminal_wealth"], nbins=50,
+        labels={"x": "Patrimonio reale (€)", "y": "Simulazioni"},
+        color_discrete_sequence=["#636EFA"],
+        title=f"Distribuzione del patrimonio reale a {p['target_age']} anni",
+    )
+    fig_hist.add_vline(x=0, line_dash="dash", line_color="red")
+    fig_hist.update_layout(template="plotly_dark", height=350)
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    st.subheader("Percentili a età chiave — parametri base")
+    key_ages = sorted(set(a for a in [
+        p["current_age"], p["stop_working_age"], 60, pension_info["pension_age"], p["target_age"]
+    ] if p["current_age"] <= a <= p["target_age"]))
+    pct_table = [{
+        "Età": ka,
+        "P5": fmt_eur(pct["p5"][ages_mc.index(ka)]),
+        "P25": fmt_eur(pct["p25"][ages_mc.index(ka)]),
+        "P50": fmt_eur(pct["p50"][ages_mc.index(ka)]),
+        "P75": fmt_eur(pct["p75"][ages_mc.index(ka)]),
+        "P95": fmt_eur(pct["p95"][ages_mc.index(ka)]),
+    } for ka in key_ages if ka in ages_mc]
+    if pct_table:
+        st.dataframe(pd.DataFrame(pct_table), use_container_width=True, hide_index=True)
+
+    # ── MC confronto scenari (solo tabella) ──────────────────────────────
+    st.divider()
+    st.subheader("📋 Confronto Monte Carlo tra scenari")
+    st.caption(
+        "Stesso seed casuale per tutti e 3 (Common Random Numbers): le differenze riflettono "
+        f"i parametri, non il rumore. Simulazioni: min({p['n_simulations']}, 500)."
+    )
+    run_mc_cmp = st.checkbox(
+        "Calcola Monte Carlo per i 3 scenari?",
+        value=False,
+        key="sc_run_mc",
+        help="Avvia N simulazioni per scenario (N da sidebar, massimo 500).",
+    )
+
+    if run_mc_cmp:
+        _n_sim = min(p["n_simulations"], 500)
+        mc_results_list = []
+        with st.spinner(f"Running {_n_sim} × 3 scenari (stesso seed = CRN)…"):
+            for res in results:
+                _mc = _cached_monte_carlo(
+                    n_simulations=_n_sim,
+                    current_age=p["current_age"], target_age=p["target_age"],
+                    net_monthly_salary=float(net_monthly_salary),
+                    monthly_expenses=res["expenses"],
+                    age_started_working=p["age_started_working"],
+                    etf_value=p["etf_value"], monthly_pac=res["pac"],
+                    etf_net_return=res["etf"],
+                    expected_gross_return=res["etf"] + p["ter"] + p["ivafe"],
+                    etf_volatility=p["etf_volatility"],
+                    ter=p["ter"], ivafe=p["ivafe"],
+                    capital_gains_tax=p["capital_gains_tax"],
+                    bank_balance=p["bank_balance"], bank_interest=p["bank_interest"],
+                    emergency_fund=p["emergency_fund"], stamp_duty=p["stamp_duty"],
+                    pension_fund_value=p["pf_value"],
+                    total_annual_contribution=total_annual_contribution,
+                    voluntary_extra=p["voluntary_extra"],
+                    pension_fund_return=p["fund_return"],
+                    annuity_rate=p["annuity_rate"], age_joined_fund=p["age_joined_fund"],
+                    stop_working_age=res["retire_age"],
+                    part_time=p["part_time"], part_time_salary=p["part_time_salary"],
+                    part_time_until_age=p["part_time_until_age"],
+                    inflation=res["inflation"], inflation_std=p["inflation_std"],
+                    state_pension_annual_net=res["pension_net"],
+                    pension_start_age=res["pension_age"],
+                    contribution_years=res["contribution_years"],
+                    scenario=p["mc_scenario"],
+                    seed=42,
+                    part_time_monthly_gross=p.get("part_time_monthly_gross", 0.0),
+                    inps_employee_rate=p["inps_employee_rate"],
+                    surcharges_rate=p["surcharges_rate"],
+                    tfr_destination=p.get("tfr_destination", "fund"),
+                    tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
+                    tfr_company_value=p.get("tfr_company_value", 0.0),
+                    couple_net_monthly=p.get("couple_net_monthly", 0.0),
+                    couple_stop_working_age=p.get("couple_stop_working_age", 0),
+                )
+                mc_results_list.append(_mc)
+
+        _summary_rows = []
+        for res, mc_r in zip(results, mc_results_list):
+            _pct = mc_r["percentiles"]
+            _summary_rows.append({
+                "Scenario": res["name"],
+                "Età ritiro": res["retire_age"],
+                "P(solvenza)": f"{mc_r['probability_solvent'] * 100:.1f}%",
+                "Età media rovina": f"{mc_r['avg_broke_age']:.0f}" if mc_r["probability_solvent"] < 1.0 else "—",
+                f"P10 a {p['target_age']}": fmt_eur(_pct["p10"][-1]),
+                f"P50 a {p['target_age']}": fmt_eur(_pct["p50"][-1]),
+                f"P90 a {p['target_age']}": fmt_eur(_pct["p90"][-1]),
+            })
+        st.dataframe(pd.DataFrame(_summary_rows), use_container_width=True, hide_index=True)
+
+
 
     etf_net_return = p["expected_gross_return"] - p["ter"] - p["ivafe"]
     tfr_to_fund = p["tfr_contribution"] if p.get("tfr_destination", "fund") == "fund" else 0.0
@@ -1546,7 +1776,7 @@ def main():
     tabs = st.tabs([
         "💸 Expenses", "💰 Salary", "📊 Projections", "🔥 FIRE",
         "🏛️ Pension & NPV", "📋 Dashboard",
-        "🔬 Sensitivity", "📊 Scenarios", "🎲 Monte Carlo",
+        "🔬 Sensitivity", "📊 Scenari & MC",
     ])
 
     with tabs[0]:
@@ -1572,10 +1802,7 @@ def main():
         tab_sensitivity(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
 
     with tabs[7]:
-        tab_scenario_comparison(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
-
-    with tabs[8]:
-        tab_monte_carlo(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
+        tab_scenarios_mc(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
 
 
 if __name__ == "__main__":

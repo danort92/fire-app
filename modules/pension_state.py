@@ -48,6 +48,7 @@ def calculate_state_pension(
     early_pension_years: int = 0,       # if > 0, trigger early pension at this contribution threshold
     part_time_monthly_gross: float = 0.0,  # gross monthly part-time RAL (preferred over net for INPS)
     defer_to_71: bool = False,          # if True, defer pension to 71 for max INPS coefficient
+    base_vecchiaia_age: int = 67,       # standard pension age; increase for LE Fornero adjustment
 ) -> dict:
     """
     Calculate INPS state pension using contributive method.
@@ -100,8 +101,8 @@ def calculate_state_pension(
         pension_age = min(pension_age, 71)  # coefficient table ends at 71
 
     else:
-        # Standard pensione di vecchiaia contributiva: age 67
-        pension_age = max(pension_age_min, 67)
+        # Standard pensione di vecchiaia contributiva: base age (default 67, can be LE-adjusted)
+        pension_age = max(pension_age_min, base_vecchiaia_age)
         pension_age = min(pension_age, 71)  # never force beyond 71
 
     # Eligibility check

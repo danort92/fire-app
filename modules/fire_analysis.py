@@ -103,6 +103,7 @@ def run_your_scenario(
     tfr_revaluation_rate: float = 0.015,
     couple_net_monthly: float = 0.0,
     couple_stop_working_age: int = 0,
+    **_,
 ) -> dict:
     """Run the user's chosen scenario and compute summary stats."""
     kwargs = _build_projection_kwargs(

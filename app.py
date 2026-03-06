@@ -76,6 +76,20 @@ def _cached_sensitivity(**kwargs):
 # ─────────────────────────────────────────────
 def sidebar_inputs():
     st.sidebar.title("⚙️ Parameters")
+
+    # ── Display mode toggle ────────────────────────────────────────────────
+    _mode = st.sidebar.radio(
+        "📊 Chart display mode",
+        ["Real (today's €)", "Nominal (year-of-payment €)"],
+        index=0,
+        horizontal=True,
+        key="display_mode_radio",
+        help="Real: inflation-adjusted to today's purchasing power. "
+             "Nominal: future money at face value.",
+    )
+    st.session_state["display_real"] = (_mode == "Real (today's €)")
+    st.sidebar.divider()
+
     D = DEFAULT_ASSUMPTIONS
     p = D["personal"]
     s = D["salary"]
@@ -415,24 +429,45 @@ def tab_projections(p, net_monthly_salary, monthly_expenses, pension_info, rows)
     # Show TFR column only if in azienda mode
     show_tfr = p.get("tfr_destination") == "company" and any(r.get("tfr_company", 0) > 0 for r in rows)
 
-    ages        = [r["age"] for r in rows]
-    banks_real  = [r["bank_real"] for r in rows]
-    etfs_real   = [r["etf_real"] for r in rows]
-    pfs_real    = [r["pf_real"] for r in rows]
-    tfrs_real   = [r.get("tfr_real", 0) for r in rows]
-    totals_real = [r["total_real"] for r in rows]
+    display_real = st.session_state.get("display_real", True)
+
+    if not display_real:
+        st.warning(
+            "⚠️ Showing **nominal** values — future money at face value, **not** adjusted for inflation. "
+            "Switch to *Real* mode in the sidebar for inflation-adjusted figures."
+        )
+
+    ages = [r["age"] for r in rows]
+    if display_real:
+        banks_  = [r["bank_real"] for r in rows]
+        etfs_   = [r["etf_real"] for r in rows]
+        pfs_    = [r["pf_real"] for r in rows]
+        tfrs_   = [r.get("tfr_real", 0) for r in rows]
+        totals_ = [r["total_real"] for r in rows]
+        y_label = "€ real (today's purchasing power)"
+        mode_label = "real (today's €, inflation-adjusted)"
+        total_name = "Total Real"
+    else:
+        banks_  = [r["bank"] for r in rows]
+        etfs_   = [r["etf"] for r in rows]
+        pfs_    = [r["pf"] for r in rows]
+        tfrs_   = [r.get("tfr_company", 0) for r in rows]
+        totals_ = [r["total_nominal"] for r in rows]
+        y_label = "€ nominal (year-of-payment)"
+        mode_label = "nominal (future money, not inflation-adjusted)"
+        total_name = "Total Nominal"
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=ages, y=banks_real, name="Bank Account (real)",
+    fig.add_trace(go.Scatter(x=ages, y=banks_, name="Bank Account",
                               stackgroup="one", fill="tonexty", line_color="#636EFA"))
-    fig.add_trace(go.Scatter(x=ages, y=pfs_real, name="Pension Fund (real)",
+    fig.add_trace(go.Scatter(x=ages, y=pfs_, name="Pension Fund",
                               stackgroup="one", fill="tonexty", line_color="#00CC96"))
-    fig.add_trace(go.Scatter(x=ages, y=etfs_real, name="ETF (real)",
+    fig.add_trace(go.Scatter(x=ages, y=etfs_, name="ETF",
                               stackgroup="one", fill="tonexty", line_color="#FFA15A"))
     if show_tfr:
-        fig.add_trace(go.Scatter(x=ages, y=tfrs_real, name="TFR (real)",
+        fig.add_trace(go.Scatter(x=ages, y=tfrs_, name="TFR",
                                   stackgroup="one", fill="tonexty", line_color="#AB63FA"))
-    fig.add_trace(go.Scatter(x=ages, y=totals_real, name="Total Real", mode="lines",
+    fig.add_trace(go.Scatter(x=ages, y=totals_, name=total_name, mode="lines",
                               line=dict(color="white", width=2, dash="dot")))
 
     fig.add_vline(x=p["stop_working_age"], line_dash="dash", line_color="red",
@@ -442,8 +477,8 @@ def tab_projections(p, net_monthly_salary, monthly_expenses, pension_info, rows)
                       annotation_text=f"State pension {pension_info['pension_age']}")
 
     fig.update_layout(
-        title="Wealth Evolution by Asset Class — all values in real (today's €, inflation-adjusted)",
-        xaxis_title="Age", yaxis_title="€ real",
+        title=f"Wealth Evolution by Asset Class — {mode_label}",
+        xaxis_title="Age", yaxis_title=y_label,
         hovermode="x unified", template="plotly_dark", height=500,
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -930,44 +965,78 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
 
     # Wealth evolution chart
     if rows:
+        display_real = st.session_state.get("display_real", True)
+
+        if not display_real:
+            st.warning(
+                "⚠️ Showing **nominal** values — future money at face value, **not** adjusted for inflation. "
+                "Switch to *Real* mode in the sidebar for inflation-adjusted figures."
+            )
+
         st.subheader("📈 Wealth Evolution")
         ages_d = [r["age"] for r in rows]
+        if display_real:
+            _etf_y  = [r["etf_real"] for r in rows]
+            _pf_y   = [r["pf_real"] for r in rows]
+            _bank_y = [r["bank_real"] for r in rows]
+            _dash_title = "Wealth by component — real (today's €, inflation-adjusted)"
+            _y_axis = "€ real"
+        else:
+            _etf_y  = [r["etf"] for r in rows]
+            _pf_y   = [r["pf"] for r in rows]
+            _bank_y = [r["bank"] for r in rows]
+            _dash_title = "Wealth by component — nominal (year-of-payment €)"
+            _y_axis = "€ nominal"
+
         fig_dash = go.Figure()
-        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["etf_real"] for r in rows],
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=_etf_y,
                                       name="ETF", stackgroup="wealth",
                                       line=dict(color="#636EFA")))
-        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["pf_real"] for r in rows],
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=_pf_y,
                                       name="Pension Fund", stackgroup="wealth",
                                       line=dict(color="#00CC96")))
-        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["bank_real"] for r in rows],
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=_bank_y,
                                       name="Bank", stackgroup="wealth",
                                       line=dict(color="#FFA15A")))
         fig_dash.add_vline(x=p["stop_working_age"], line_dash="dash", line_color="red",
                            annotation_text="Retire", annotation_position="top right")
         fig_dash.update_layout(
-            title="Wealth by component — real (today's €, inflation-adjusted)",
-            xaxis_title="Age", yaxis_title="€ real",
+            title=_dash_title,
+            xaxis_title="Age", yaxis_title=_y_axis,
             template="plotly_dark", height=380, hovermode="x unified",
         )
         st.plotly_chart(fig_dash, use_container_width=True)
 
     st.divider()
 
-    st.caption("All amounts in real terms (today's purchasing power, inflation-adjusted).")
+    _mode_caption = "today's purchasing power, inflation-adjusted" if st.session_state.get("display_real", True) else "nominal future money — not inflation-adjusted"
+    st.caption(f"Snapshot amounts in {_mode_caption}.")
     # Snapshots
+    display_real = st.session_state.get("display_real", True)
+    _snap_suffix = "real" if display_real else "nominal"
     for snap_age, snap_label in [(50, "50"), (p["target_age"], str(p["target_age"]))]:
         row = next((r for r in rows if r["age"] == snap_age), None)
         if row:
-            st.subheader(f"📸 Wealth snapshot at age {snap_label} (real €)")
+            st.subheader(f"📸 Wealth snapshot at age {snap_label} ({_snap_suffix} €)")
             cols = st.columns(4 if p.get("tfr_destination") != "company" else 5)
-            cols[0].metric("Bank (real)", fmt_eur(row["bank_real"]))
-            cols[1].metric("ETF (real)", fmt_eur(row["etf_real"]))
-            cols[2].metric("Pension Fund (real)", fmt_eur(row["pf_real"]))
-            if p.get("tfr_destination") == "company":
-                cols[3].metric("TFR (real)", fmt_eur(row.get("tfr_real", 0)))
-                cols[4].metric("Total Real", fmt_eur(row["total_real"]))
+            if display_real:
+                cols[0].metric("Bank", fmt_eur(row["bank_real"]))
+                cols[1].metric("ETF", fmt_eur(row["etf_real"]))
+                cols[2].metric("Pension Fund", fmt_eur(row["pf_real"]))
+                if p.get("tfr_destination") == "company":
+                    cols[3].metric("TFR", fmt_eur(row.get("tfr_real", 0)))
+                    cols[4].metric("Total", fmt_eur(row["total_real"]))
+                else:
+                    cols[3].metric("Total", fmt_eur(row["total_real"]))
             else:
-                cols[3].metric("Total Real", fmt_eur(row["total_real"]))
+                cols[0].metric("Bank", fmt_eur(row["bank"]))
+                cols[1].metric("ETF", fmt_eur(row["etf"]))
+                cols[2].metric("Pension Fund", fmt_eur(row["pf"]))
+                if p.get("tfr_destination") == "company":
+                    cols[3].metric("TFR", fmt_eur(row.get("tfr_company", 0)))
+                    cols[4].metric("Total", fmt_eur(row["total_nominal"]))
+                else:
+                    cols[3].metric("Total", fmt_eur(row["total_nominal"]))
 
     if p.get("couple_net_monthly", 0) > 0:
         st.info(

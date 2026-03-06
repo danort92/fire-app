@@ -1055,14 +1055,14 @@ def tab_scenario_comparison(p, net_monthly_salary, monthly_expenses, pension_inf
         a_name = st.text_input("Name A", "Conservative (retire later)", key="sc_a_name")
         a_retire = st.number_input("Retire age A", p["current_age"] + 1, 70,
             min(65, p["stop_working_age"] + 5), key="sc_a_retire")
-        a_pac = st.number_input("Monthly PAC A (€)", 0, 5000, p["monthly_pac"], step=50, key="sc_a_pac")
+        a_pac = st.number_input("Monthly PAC A (€)", 0, 5000, int(p["monthly_pac"]), step=50, key="sc_a_pac")
 
     with scol2:
         st.markdown("**Scenario B** (Base)")
         b_name = st.text_input("Name B", "Base scenario", key="sc_b_name")
         b_retire = st.number_input("Retire age B", p["current_age"] + 1, 70,
             p["stop_working_age"], key="sc_b_retire")
-        b_pac = st.number_input("Monthly PAC B (€)", 0, 5000, p["monthly_pac"], step=50, key="sc_b_pac")
+        b_pac = st.number_input("Monthly PAC B (€)", 0, 5000, int(p["monthly_pac"]), step=50, key="sc_b_pac")
 
     with scol3:
         st.markdown("**Scenario C**")
@@ -1070,7 +1070,7 @@ def tab_scenario_comparison(p, net_monthly_salary, monthly_expenses, pension_inf
         c_retire = st.number_input("Retire age C", p["current_age"] + 1, 70,
             max(p["current_age"] + 1, p["stop_working_age"] - 5), key="sc_c_retire")
         c_pac = st.number_input("Monthly PAC C (€)", 0, 5000,
-            min(5000, p["monthly_pac"] + 200), step=50, key="sc_c_pac")
+            min(5000, int(p["monthly_pac"]) + 200), step=50, key="sc_c_pac")
 
     scenarios = [
         (a_name, a_retire, a_pac),

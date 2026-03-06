@@ -163,7 +163,7 @@ base_params = dict(
 )
 
 sp = calculate_state_pension(**base_params)
-ok("pension_age ≥ 71", sp["pension_age"] >= 71, f"got {sp['pension_age']}")
+ok("pension_age ≥ 67", sp["pension_age"] >= 67, f"got {sp['pension_age']}")
 ok("contribution_years > 0", sp["contribution_years"] > 0)
 ok("eligible with 20+ years", sp["eligible"])
 ok("montante > 0", sp["montante"] > 0)

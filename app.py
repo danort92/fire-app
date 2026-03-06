@@ -125,7 +125,7 @@ def sidebar_inputs():
             "TFR destination",
             options=["fund", "company"],
             index=0 if pf.get("tfr_destination", "fund") == "fund" else 1,
-            format_func=lambda x: "Fondo pensione (default)" if x == "fund" else "Lasciato in azienda",
+            format_func=lambda x: "Pension fund (default)" if x == "fund" else "Left with employer (TFR company)",
             help="If 'company': TFR stays with employer, revalued at 1.5%+75%×ISTAT, paid net at termination.",
         )
         pf_value = st.number_input("Pension fund value (€)", 0, 500000, pf["current_value"], step=1000)
@@ -189,16 +189,16 @@ def sidebar_inputs():
         swr_pct = st.number_input("Safe Withdrawal Rate / SWR (%)", 1.0, 10.0,
             round(f["safe_withdrawal_rate"] * 100, 2), step=0.1, format="%.1f")
 
-    with st.sidebar.expander("🏦 Pensione anticipata"):
+    with st.sidebar.expander("🏦 Early Pension (Pensione Anticipata)"):
         defer_to_71 = st.checkbox("Defer state pension to 71 (max coefficient)?", value=po.get("defer_to_71", False),
-            help="If checked, pension age = 71 for maximum INPS coefficient. Otherwise, pensione di vecchiaia at 67.")
-        early_pension = st.checkbox("Pensione anticipata (41+ anni contributi)?",
+            help="If checked, pension age = 71 for maximum INPS coefficient. Otherwise, standard pension at 67.")
+        early_pension = st.checkbox("Early pension (41+ contribution years)?",
             value=(po.get("early_pension_years", 0) > 0),
             help="If checked, pension starts when contribution years threshold is reached (min age 57).")
         if early_pension and not defer_to_71:
             early_pension_years = st.number_input(
                 "Contribution years threshold", 20, 45, po.get("early_pension_years", 41),
-                help="Pensione anticipata ordinaria: 41 years + 10 months (women) / 42 + 10 months (men).")
+                help="Standard early pension: 41 years + 10 months (women) / 42 + 10 months (men).")
         else:
             early_pension_years = 0
 
@@ -367,12 +367,12 @@ def tab_salary(p):
         ti = tax_result["trattamento_integrativo"]
         breakdown_rows = [
             ("INPS (employee share)", tax_result["inps"]),
-            ("Taxable income (reddito complessivo)", tax_result["taxable_income"]),
+            ("Taxable income", tax_result["taxable_income"]),
             ("Gross IRPEF", tax_result["irpef"]),
-            ("Detrazioni lavoro dipendente", -tax_result["deductions"]),
+            ("Employment deductions (detrazioni lav. dip.)", -tax_result["deductions"]),
         ]
         if ti > 0:
-            breakdown_rows.append(("Trattamento Integrativo 2025", -ti))
+            breakdown_rows.append(("Tax bonus (Trattamento Integrativo 2025)", -ti))
         breakdown_rows += [
             ("Regional/municipal surcharges", tax_result["surcharges"]),
             ("Net IRPEF + surcharges", tax_result["net_irpef"]),
@@ -381,7 +381,7 @@ def tab_salary(p):
         df["Amount (€)"] = df["Amount (€)"].apply(lambda x: fmt_eur(x))
         st.dataframe(df, use_container_width=True, hide_index=True)
         if ti > 0:
-            st.success(f"Trattamento Integrativo: +{fmt_eur(ti)}/year ({fmt_eur(ti/12, 2)}/month)")
+            st.success(f"Tax Bonus (Trattamento Integrativo): +{fmt_eur(ti)}/year ({fmt_eur(ti/12, 2)}/month)")
 
     with col_b:
         st.subheader("RAL Breakdown")
@@ -430,7 +430,7 @@ def tab_projections(p, net_monthly_salary, monthly_expenses, pension_info, rows)
     fig.add_trace(go.Scatter(x=ages, y=etfs, name="ETF",
                               stackgroup="one", fill="tonexty", line_color="#FFA15A"))
     if show_tfr:
-        fig.add_trace(go.Scatter(x=ages, y=tfrs, name="TFR (azienda)",
+        fig.add_trace(go.Scatter(x=ages, y=tfrs, name="TFR (company)",
                                   stackgroup="one", fill="tonexty", line_color="#AB63FA"))
     fig.add_trace(go.Scatter(x=ages, y=totals_real, name="Total Real", mode="lines",
                               line=dict(color="white", width=2, dash="dot")))
@@ -585,6 +585,13 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
     col_a, col_b = st.columns(2)
     col_a.metric("Earliest possible FIRE age", f"{earliest_age} years",
                   delta=f"{earliest_age - p['current_age']} years to FIRE")
+    contrib_at_fire = earliest_age - p["age_started_working"]
+    if contrib_at_fire < 20:
+        st.warning(
+            f"⚠️ At FIRE age {earliest_age} you would have only **{contrib_at_fire} contribution years** "
+            f"(need ≥20 for INPS state pension). Solvency is based entirely on your investment portfolio — "
+            f"**no state pension income** is included in this projection."
+        )
 
     with st.spinner("Computing optimal PAC..."):
         optimal_pac = _cached_optimal_pac(
@@ -659,10 +666,12 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
         st.subheader("INPS State Pension (Contributory Method)")
         early_yrs = p.get("early_pension_years", 0)
         if early_yrs > 0:
-            st.info(f"Pensione anticipata enabled: threshold {early_yrs} contribution years")
+            st.info(f"Early pension enabled: threshold {early_yrs} contribution years")
         if p.get("defer_to_71"):
             st.info("Pension deferred to age 71 for maximum INPS coefficient")
 
+        st.caption("⚠️ Net figures use IRPEF rates (not flat fund tax). "
+                   "Supplementary pension fund income is shown separately →")
         if pension_info["eligible"]:
             st.success(f"Eligible for state pension at age **{pension_info['pension_age']}**")
             m1, m2, m3 = st.columns(3)
@@ -670,11 +679,11 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
             m2.metric("Contribution years", pension_info["contribution_years"])
             m3.metric("Pension pot (montante)", fmt_eur(pension_info["montante"]))
             m4, m5 = st.columns(2)
-            m4.metric("Gross annual pension", fmt_eur(pension_info["gross_annual"]))
-            m5.metric("Net annual pension", fmt_eur(pension_info["net_annual_nominal"]))
-            st.metric("Net monthly pension (÷13)", fmt_eur(pension_info["net_monthly_nominal"]))
+            m4.metric("Gross annual pension (INPS only)", fmt_eur(pension_info["gross_annual"]))
+            m5.metric("Net annual pension (INPS only)", fmt_eur(pension_info["net_annual_nominal"]))
+            st.metric("Net monthly pension (÷13, INPS only)", fmt_eur(pension_info["net_monthly_nominal"]))
         else:
-            st.error("Not eligible for INPS state pension (insufficient contribution years)")
+            st.error("Not eligible for INPS state pension — insufficient contribution years (need ≥20)")
 
     with col2:
         st.subheader("Supplementary Pension Fund")
@@ -700,7 +709,7 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
 
         if p.get("tfr_destination") == "company":
             st.warning(
-                f"TFR is in azienda — not flowing into the pension fund. "
+                f"TFR stays with employer — not flowing into the pension fund. "
                 f"TFR accrual: ~{fmt_eur(p['ral']/13.5, 0)}/year"
             )
 
@@ -746,7 +755,7 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
     col_n3.metric("NPV Difference", fmt_eur(npv_result["npv_difference"], 2),
                    help=f"Winner: {npv_result['winner']}")
 
-    if npv_result["winner"] == "Fondo Pensione":
+    if npv_result["winner"] != "ETF":
         st.success(f"🏆 **Pension Fund** wins (NPV +{fmt_eur(npv_result['npv_difference'], 2)})")
     else:
         st.info(f"🏆 **ETF** wins (NPV +{fmt_eur(npv_result['npv_difference'], 2)})")
@@ -909,6 +918,31 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
 
     st.divider()
 
+    # Wealth evolution chart
+    if rows:
+        st.subheader("📈 Wealth Evolution")
+        ages_d = [r["age"] for r in rows]
+        fig_dash = go.Figure()
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["etf"] for r in rows],
+                                      name="ETF", stackgroup="wealth",
+                                      line=dict(color="#636EFA")))
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["pf"] for r in rows],
+                                      name="Pension Fund", stackgroup="wealth",
+                                      line=dict(color="#00CC96")))
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["bank"] for r in rows],
+                                      name="Bank", stackgroup="wealth",
+                                      line=dict(color="#FFA15A")))
+        fig_dash.add_vline(x=p["stop_working_age"], line_dash="dash", line_color="red",
+                           annotation_text="Retire", annotation_position="top right")
+        fig_dash.update_layout(
+            title="Total real wealth by component",
+            xaxis_title="Age", yaxis_title="€ real",
+            template="plotly_dark", height=380, hovermode="x unified",
+        )
+        st.plotly_chart(fig_dash, use_container_width=True)
+
+    st.divider()
+
     # Snapshots
     for snap_age, snap_label in [(50, "50"), (p["target_age"], str(p["target_age"]))]:
         row = next((r for r in rows if r["age"] == snap_age), None)
@@ -919,7 +953,7 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
             cols[1].metric("ETF", fmt_eur(row["etf"]))
             cols[2].metric("Pension Fund", fmt_eur(row["pf"]))
             if p.get("tfr_destination") == "company":
-                cols[3].metric("TFR Azienda", fmt_eur(row.get("tfr_company", 0)))
+                cols[3].metric("TFR (company)", fmt_eur(row.get("tfr_company", 0)))
                 cols[4].metric("Total Real", fmt_eur(row["total_real"]))
             else:
                 cols[3].metric("Total Real", fmt_eur(row["total_real"]))
@@ -931,7 +965,7 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
         )
     if tax_result.get("trattamento_integrativo", 0) > 0:
         ti = tax_result["trattamento_integrativo"]
-        st.success(f"Trattamento Integrativo (ex Bonus Renzi): +{fmt_eur(ti)}/year applied to your IRPEF.")
+        st.success(f"Tax Bonus (Trattamento Integrativo): +{fmt_eur(ti)}/year applied to your IRPEF.")
 
 
 # ─────────────────────────────────────────────
@@ -943,24 +977,24 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
     axis_options = list(AXIS_VARIABLES.keys())
 
     sc1, sc2, sc3 = st.columns(3)
-    output_metric = sc1.selectbox("Metrica output", OUTPUT_METRICS, index=0)
-    y_var = sc2.selectbox("Variabile Y (righe)", axis_options,
-                          index=axis_options.index("Spese mensili"))
-    x_default = "Rendimento ETF netto" if y_var != "Rendimento ETF netto" else "Spese mensili"
+    output_metric = sc1.selectbox("Output metric", OUTPUT_METRICS, index=0)
+    y_var = sc2.selectbox("Y variable (rows)", axis_options,
+                          index=axis_options.index("Monthly expenses"))
+    x_default = "ETF net return" if y_var != "ETF net return" else "Monthly expenses"
     x_options = [v for v in axis_options if v != y_var]
-    x_var = sc3.selectbox("Variabile X (colonne)", x_options,
+    x_var = sc3.selectbox("X variable (columns)", x_options,
                           index=x_options.index(x_default) if x_default in x_options else 0)
 
     st.caption(
-        f"Mostra come **{output_metric.lower()}** varia al variare di "
-        f"**{x_var}** (colonne) e **{y_var}** (righe) intorno ai valori base."
+        f"How **{output_metric.lower()}** changes as "
+        f"**{x_var}** (columns) and **{y_var}** (rows) vary from your base values."
     )
 
     etf_net_return = p["expected_gross_return"] - p["ter"] - p["ivafe"]
     tfr_to_fund = p["tfr_contribution"] if p.get("tfr_destination", "fund") == "fund" else 0.0
     total_annual_contribution = tfr_to_fund + p["employer_contribution"] + p["personal_contribution"]
 
-    with st.spinner("Calcolo 25 scenari..."):
+    with st.spinner("Computing 25 scenarios..."):
         df_sens = _cached_sensitivity(
             base_etf_net_return=etf_net_return,
             base_monthly_expenses=monthly_expenses,
@@ -999,10 +1033,10 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
         )
 
     # Heatmap config depends on metric
-    is_age_metric = output_metric == "Età minima di pensionamento"
+    is_age_metric = output_metric == "Earliest retirement age"
     color_scale  = "RdYlGn_r" if is_age_metric else "RdYlGn"
-    color_label  = "Età (anni)" if is_age_metric else "Portafoglio (€k)"
-    better_note  = "minore = meglio" if is_age_metric else "maggiore = meglio"
+    color_label  = "Age (years)" if is_age_metric else "Portfolio (€k)"
+    better_note  = "lower = better" if is_age_metric else "higher = better"
 
     fig_heat = px.imshow(
         df_sens.values,
@@ -1017,10 +1051,10 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
     fig_heat.update_layout(template="plotly_dark", height=420)
     st.plotly_chart(fig_heat, use_container_width=True)
 
-    st.subheader("Tabella")
+    st.subheader("Table")
     st.dataframe(df_sens, use_container_width=True)
 
-    # Key metrics — find the base cell (delta = 0 for both axes)
+    # Key metrics — find the base cell (delta = +0 for both axes)
     x_zero = AXIS_VARIABLES[x_var]["label_fmt"].format(0.0)
     y_zero = AXIS_VARIABLES[y_var]["label_fmt"].format(0.0)
     base_val = df_sens.loc[y_zero, x_zero] if y_zero in df_sens.index and x_zero in df_sens.columns else None
@@ -1028,16 +1062,20 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
         if is_age_metric:
             best_case  = int(df_sens.values.min())
             worst_case = int(df_sens.values.max())
-            fmt = lambda v: f"{v} anni"
+            fmt_v = lambda v: f"{v} yrs"
         else:
             best_case  = int(df_sens.values.max())
             worst_case = int(df_sens.values.min())
-            fmt = lambda v: f"€{v}k"
+            fmt_v = lambda v: f"€{v}k"
         base_val = int(base_val)
         bc1, bc2, bc3 = st.columns(3)
-        bc1.metric("Base case", fmt(base_val))
-        bc2.metric("Caso migliore", fmt(best_case),  delta=f"{best_case  - base_val:+d}")
-        bc3.metric("Caso peggiore", fmt(worst_case), delta=f"{worst_case - base_val:+d}")
+        bc1.metric("Base case", fmt_v(base_val))
+        # For age: lower is better → invert Streamlit's default green=positive convention
+        dc = "inverse" if is_age_metric else "normal"
+        bc2.metric("Best case", fmt_v(best_case),
+                   delta=f"{best_case - base_val:+d}", delta_color=dc)
+        bc3.metric("Worst case", fmt_v(worst_case),
+                   delta=f"{worst_case - base_val:+d}", delta_color=dc)
 
 
 # ─────────────────────────────────────────────
@@ -1076,41 +1114,55 @@ def tab_scenario_comparison(p, net_monthly_salary, monthly_expenses, pension_inf
 
     # Scenario definitions
     st.subheader("Define Scenarios")
+    base_etf = p["expected_gross_return"] - p["ter"] - p["ivafe"]
+
     scol1, scol2, scol3 = st.columns(3)
 
     with scol1:
         st.markdown("**Scenario A**")
-        a_name = st.text_input("Name A", "Conservative (retire later)", key="sc_a_name")
-        a_retire = st.number_input("Retire age A", p["current_age"] + 1, 70,
-            min(65, p["stop_working_age"] + 5), key="sc_a_retire")
-        a_pac = st.number_input("Monthly PAC A (€)", 0, 5000, int(p["monthly_pac"]), step=50, key="sc_a_pac")
+        a_name    = st.text_input("Name A", "Conservative (retire later)", key="sc_a_name")
+        a_retire  = st.number_input("Retire age", p["current_age"] + 1, 70,
+                        min(65, p["stop_working_age"] + 5), key="sc_a_retire")
+        a_pac     = st.number_input("Monthly PAC (€)", 0, 10_000, int(p["monthly_pac"]), step=50, key="sc_a_pac")
+        a_exp     = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="sc_a_exp")
+        a_etf     = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="sc_a_etf") / 100
+        a_infl    = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="sc_a_infl") / 100
+        a_ral     = st.number_input("Annual gross salary RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="sc_a_ral")
 
     with scol2:
         st.markdown("**Scenario B** (Base)")
-        b_name = st.text_input("Name B", "Base scenario", key="sc_b_name")
-        b_retire = st.number_input("Retire age B", p["current_age"] + 1, 70,
-            p["stop_working_age"], key="sc_b_retire")
-        b_pac = st.number_input("Monthly PAC B (€)", 0, 5000, int(p["monthly_pac"]), step=50, key="sc_b_pac")
+        b_name    = st.text_input("Name B", "Base scenario", key="sc_b_name")
+        b_retire  = st.number_input("Retire age", p["current_age"] + 1, 70,
+                        p["stop_working_age"], key="sc_b_retire")
+        b_pac     = st.number_input("Monthly PAC (€)", 0, 10_000, int(p["monthly_pac"]), step=50, key="sc_b_pac")
+        b_exp     = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="sc_b_exp")
+        b_etf     = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="sc_b_etf") / 100
+        b_infl    = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="sc_b_infl") / 100
+        b_ral     = st.number_input("Annual gross salary RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="sc_b_ral")
 
     with scol3:
         st.markdown("**Scenario C**")
-        c_name = st.text_input("Name C", "Aggressive (retire early)", key="sc_c_name")
-        c_retire = st.number_input("Retire age C", p["current_age"] + 1, 70,
-            max(p["current_age"] + 1, p["stop_working_age"] - 5), key="sc_c_retire")
-        c_pac = st.number_input("Monthly PAC C (€)", 0, 5000,
-            min(5000, int(p["monthly_pac"]) + 200), step=50, key="sc_c_pac")
+        c_name    = st.text_input("Name C", "Aggressive (retire early)", key="sc_c_name")
+        c_retire  = st.number_input("Retire age", p["current_age"] + 1, 70,
+                        max(p["current_age"] + 1, p["stop_working_age"] - 5), key="sc_c_retire")
+        c_pac     = st.number_input("Monthly PAC (€)", 0, 10_000,
+                        min(10_000, int(p["monthly_pac"]) + 200), step=50, key="sc_c_pac")
+        c_exp     = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="sc_c_exp")
+        c_etf     = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="sc_c_etf") / 100
+        c_infl    = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="sc_c_infl") / 100
+        c_ral     = st.number_input("Annual gross salary RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="sc_c_ral")
 
     scenarios = [
-        (a_name, a_retire, a_pac),
-        (b_name, b_retire, b_pac),
-        (c_name, c_retire, c_pac),
+        (a_name, a_retire, a_pac, a_exp, a_etf, a_infl, a_ral),
+        (b_name, b_retire, b_pac, b_exp, b_etf, b_infl, b_ral),
+        (c_name, c_retire, c_pac, c_exp, c_etf, c_infl, c_ral),
     ]
 
     with st.spinner("Running 3 scenarios..."):
         results = []
-        for name, retire_age, pac in scenarios:
+        for name, retire_age, pac, sc_exp, sc_etf, sc_infl, sc_ral in scenarios:
             p_info = calculate_state_pension(
-                ral=p["ral"], ral_growth=p["ral_growth"],
+                ral=sc_ral, ral_growth=p["ral_growth"],
                 inps_contribution_rate=p["inps_contribution_rate"],
                 gdp_revaluation_rate=p["gdp_revaluation_rate"],
                 current_age=p["current_age"], age_started_working=p["age_started_working"],
@@ -1123,18 +1175,27 @@ def tab_scenario_comparison(p, net_monthly_salary, monthly_expenses, pension_inf
                 early_pension_years=p.get("early_pension_years", 0),
                 defer_to_71=p.get("defer_to_71", False),
             )
+            sc_base = {**_base,
+                       "monthly_expenses": sc_exp,
+                       "etf_net_return": sc_etf,
+                       "inflation": sc_infl,
+                       "ral": sc_ral}
             rs = run_your_scenario(
                 monthly_pac=pac,
                 stop_working_age=retire_age,
                 state_pension_annual_net=p_info["net_annual_nominal"] if p_info["eligible"] else 0.0,
                 pension_start_age=p_info["pension_age"],
                 contribution_years=p_info["contribution_years"],
-                **_base,
+                **sc_base,
             )
             results.append({
                 "name": name,
                 "retire_age": retire_age,
                 "pac": pac,
+                "expenses": sc_exp,
+                "etf": sc_etf,
+                "inflation": sc_infl,
+                "ral": sc_ral,
                 "pension_age": p_info["pension_age"],
                 "pension_net": p_info["net_annual_nominal"] if p_info["eligible"] else 0,
                 "rows": rs["rows"],
@@ -1152,6 +1213,10 @@ def tab_scenario_comparison(p, net_monthly_salary, monthly_expenses, pension_inf
             st.markdown(f"**{res['name']}**")
             st.metric("Retire age", res["retire_age"])
             st.metric("Monthly PAC", fmt_eur(res["pac"]))
+            st.metric("Monthly expenses", fmt_eur(res["expenses"]))
+            st.metric("ETF net return", fmt_pct(res["etf"]))
+            st.metric("Inflation", fmt_pct(res["inflation"]))
+            st.metric("RAL", fmt_eur(res["ral"]))
             st.metric("Status", status)
             st.metric(f"Real wealth at {p['target_age']}", fmt_eur(res["final_wealth"]))
             st.metric("State pension age", res["pension_age"])
@@ -1251,8 +1316,8 @@ def main():
 
     tabs = st.tabs([
         "💸 Expenses", "💰 Salary", "📊 Projections", "🔥 FIRE",
-        "🏛️ Pension & NPV", "🎲 Monte Carlo", "📋 Dashboard",
-        "🔬 Sensitivity", "📊 Scenarios",
+        "🏛️ Pension & NPV", "📋 Dashboard",
+        "🔬 Sensitivity", "📊 Scenarios", "🎲 Monte Carlo",
     ])
 
     with tabs[0]:
@@ -1272,16 +1337,16 @@ def main():
         tab_pension(p, float(net_monthly_salary), pension_info, tax_result)
 
     with tabs[5]:
-        tab_monte_carlo(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
-
-    with tabs[6]:
         tab_dashboard(p, tax_result, monthly_expenses_val, pension_info, rows)
 
-    with tabs[7]:
+    with tabs[6]:
         tab_sensitivity(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
 
-    with tabs[8]:
+    with tabs[7]:
         tab_scenario_comparison(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
+
+    with tabs[8]:
+        tab_monte_carlo(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
 
 
 if __name__ == "__main__":

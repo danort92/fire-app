@@ -5,11 +5,30 @@ Supports pensione di vecchiaia (67) and pensione anticipata (41+ anni contributi
 from .constants import INPS_COEFFICIENTS
 
 
-def _pension_tax_rate(pension_age: int, age_joined_fund: int) -> float:
-    """Pension fund tax rate at payout."""
-    years_in_fund = pension_age - age_joined_fund
-    reduction = min(0.06, max(0, (years_in_fund - 15) * 0.003))
-    return max(0.09, 0.15 - reduction)
+def _irpef_on_pension(gross_annual: float, surcharges_rate: float = 0.02) -> float:
+    """
+    Approximate Italian IRPEF on state pension income (2025 rules).
+    Uses pension-specific deductions (detrazioni per redditi da pensione),
+    NOT the supplementary fund flat tax.
+    State pension is taxed as ordinary income under IRPEF.
+    """
+    # Detrazioni per redditi da pensione (2025, approx.)
+    if gross_annual <= 8_500:
+        detrazione = 1_955.0
+    elif gross_annual <= 28_000:
+        detrazione = 700.0 + 1_255.0 * (28_000 - gross_annual) / 19_500
+    elif gross_annual <= 55_000:
+        detrazione = 700.0 * (55_000 - gross_annual) / 27_000
+    else:
+        detrazione = 0.0
+
+    irpef = (
+        min(gross_annual, 28_000) * 0.23
+        + max(0.0, min(gross_annual, 50_000) - 28_000) * 0.35
+        + max(0.0, gross_annual - 50_000) * 0.43
+    )
+    net_irpef = max(0.0, irpef - detrazione) + gross_annual * surcharges_rate
+    return net_irpef
 
 
 def calculate_state_pension(
@@ -120,9 +139,9 @@ def calculate_state_pension(
     coeff = INPS_COEFFICIENTS.get(pension_age, INPS_COEFFICIENTS[71])
     gross_annual = montante * coeff
 
-    # Pension tax (uses same schedule as pension fund)
-    tax_rate = _pension_tax_rate(pension_age, age_joined_fund)
-    net_annual_nominal = gross_annual * (1 - tax_rate)
+    # INPS state pension is taxed via IRPEF (NOT flat pension-fund rate)
+    irpef_due = _irpef_on_pension(gross_annual)
+    net_annual_nominal = gross_annual - irpef_due
     net_monthly_nominal = round(net_annual_nominal / 13, 0)
 
     return {

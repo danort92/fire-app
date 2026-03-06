@@ -315,8 +315,8 @@ def find_optimal_pac(
     defer_to_71: bool = False,
     **_,
 ) -> int:
-    """Find minimum monthly PAC (step 100) that achieves the global earliest retirement age."""
-    for pac in range(100, 2001, 100):
+    """Find minimum monthly PAC (step 50) that achieves the global earliest retirement age."""
+    for pac in range(0, 5001, 50):
         test_earliest = find_earliest_retirement(
             current_age=current_age, target_age=target_age,
             net_monthly_salary=net_monthly_salary, monthly_expenses=monthly_expenses,
@@ -344,4 +344,4 @@ def find_optimal_pac(
         if test_earliest <= global_earliest_age:
             return pac
 
-    return 2000
+    return 5000

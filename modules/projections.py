@@ -38,7 +38,8 @@ def _compute_pension_income(
 
     pvt_inc = 0.0
     if has_pvt:
-        pvt_tax = pension_fund_tax_rate(age, age_joined_fund)
+        # Tax rate fixed at pension_start_age (annuity rate is set at purchase)
+        pvt_tax = pension_fund_tax_rate(pension_start_age, age_joined_fund)
         pvt_inc = pension_fund_value * annuity_rate * (1 - pvt_tax)
 
     return state_inc, pvt_inc, has_state, has_pvt

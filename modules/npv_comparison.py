@@ -94,10 +94,10 @@ def calculate_npv_comparison(
     # Gross withdrawal at SWR
     gross_withdrawal = montante_etf * swr
 
-    # Net withdrawal after CGT
+    # Net withdrawal after CGT: gain fraction = (montante - cost_basis) / montante
     cost_basis_total = voluntary_extra * contribution_years
-    gain = max(0, gross_withdrawal - cost_basis_total * swr / max(etf_net_return, 0.001))
-    net_withdrawal = gross_withdrawal - gain * capital_gains_tax
+    gain_fraction = max(0.0, (montante_etf - cost_basis_total) / max(1.0, montante_etf))
+    net_withdrawal = gross_withdrawal * (1 - gain_fraction * capital_gains_tax)
 
     # Withdrawal PV: exponent = y + contribution_years (years from NOW to withdrawal start)
     withdraw_pv_etf = sum(
@@ -107,7 +107,7 @@ def calculate_npv_comparison(
 
     npv_etf = withdraw_pv_etf - cost_pv_etf
 
-    winner = "Fondo Pensione" if npv_pf >= npv_etf else "ETF"
+    winner = "Pension Fund" if npv_pf >= npv_etf else "ETF"
 
     return {
         "pension_fund_npv": round(npv_pf, 2),

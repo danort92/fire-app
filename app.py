@@ -415,22 +415,22 @@ def tab_projections(p, net_monthly_salary, monthly_expenses, pension_info, rows)
     # Show TFR column only if in azienda mode
     show_tfr = p.get("tfr_destination") == "company" and any(r.get("tfr_company", 0) > 0 for r in rows)
 
-    ages   = [r["age"] for r in rows]
-    banks  = [r["bank"] for r in rows]
-    etfs   = [r["etf"] for r in rows]
-    pfs    = [r["pf"] for r in rows]
-    tfrs   = [r.get("tfr_company", 0) for r in rows]
+    ages        = [r["age"] for r in rows]
+    banks_real  = [r["bank_real"] for r in rows]
+    etfs_real   = [r["etf_real"] for r in rows]
+    pfs_real    = [r["pf_real"] for r in rows]
+    tfrs_real   = [r.get("tfr_real", 0) for r in rows]
     totals_real = [r["total_real"] for r in rows]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=ages, y=banks, name="Bank Account",
+    fig.add_trace(go.Scatter(x=ages, y=banks_real, name="Bank Account (real)",
                               stackgroup="one", fill="tonexty", line_color="#636EFA"))
-    fig.add_trace(go.Scatter(x=ages, y=pfs, name="Pension Fund",
+    fig.add_trace(go.Scatter(x=ages, y=pfs_real, name="Pension Fund (real)",
                               stackgroup="one", fill="tonexty", line_color="#00CC96"))
-    fig.add_trace(go.Scatter(x=ages, y=etfs, name="ETF",
+    fig.add_trace(go.Scatter(x=ages, y=etfs_real, name="ETF (real)",
                               stackgroup="one", fill="tonexty", line_color="#FFA15A"))
     if show_tfr:
-        fig.add_trace(go.Scatter(x=ages, y=tfrs, name="TFR (company)",
+        fig.add_trace(go.Scatter(x=ages, y=tfrs_real, name="TFR (real)",
                                   stackgroup="one", fill="tonexty", line_color="#AB63FA"))
     fig.add_trace(go.Scatter(x=ages, y=totals_real, name="Total Real", mode="lines",
                               line=dict(color="white", width=2, dash="dot")))
@@ -442,18 +442,19 @@ def tab_projections(p, net_monthly_salary, monthly_expenses, pension_info, rows)
                       annotation_text=f"State pension {pension_info['pension_age']}")
 
     fig.update_layout(
-        title="Wealth Evolution by Asset Class (€ nominal)",
-        xaxis_title="Age", yaxis_title="€",
+        title="Wealth Evolution by Asset Class — all values in real (today's €, inflation-adjusted)",
+        xaxis_title="Age", yaxis_title="€ real",
         hovermode="x unified", template="plotly_dark", height=500,
     )
     st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("Detailed Table")
-    display_cols = ["age", "bank", "etf", "pf", "total_nominal", "total_real"]
-    col_names = ["Age", "Bank (€)", "ETF (€)", "Pension Fund (€)", "Total Nominal (€)", "Total Real (€)"]
+    display_cols = ["age", "bank_real", "etf_real", "pf_real", "total_real", "bank", "etf", "pf", "total_nominal"]
+    col_names    = ["Age", "Bank real (€)", "ETF real (€)", "Pension Fund real (€)", "Total Real (€)",
+                    "Bank nominal (€)", "ETF nominal (€)", "Pension Fund nominal (€)", "Total Nominal (€)"]
     if show_tfr:
-        display_cols.insert(4, "tfr_company")
-        col_names.insert(4, "TFR Azienda (€)")
+        display_cols.insert(4, "tfr_real")
+        col_names.insert(4, "TFR real (€)")
 
     df_display = df[display_cols].copy()
     df_display.columns = col_names
@@ -670,8 +671,8 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
         if p.get("defer_to_71"):
             st.info("Pension deferred to age 71 for maximum INPS coefficient")
 
-        st.caption("⚠️ Net figures use IRPEF rates (not flat fund tax). "
-                   "Supplementary pension fund income is shown separately →")
+        st.caption("⚠️ Figures are **nominal** (future money at pension age). "
+                   "IRPEF-taxed. Supplementary fund shown separately →")
         if pension_info["eligible"]:
             st.success(f"Eligible for state pension at age **{pension_info['pension_age']}**")
             m1, m2, m3 = st.columns(3)
@@ -679,9 +680,18 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
             m2.metric("Contribution years", pension_info["contribution_years"])
             m3.metric("Pension pot (montante)", fmt_eur(pension_info["montante"]))
             m4, m5 = st.columns(2)
-            m4.metric("Gross annual pension (INPS only)", fmt_eur(pension_info["gross_annual"]))
-            m5.metric("Net annual pension (INPS only)", fmt_eur(pension_info["net_annual_nominal"]))
-            st.metric("Net monthly pension (÷13, INPS only)", fmt_eur(pension_info["net_monthly_nominal"]))
+            m4.metric("Gross annual pension — nominal at retirement",
+                      fmt_eur(pension_info["gross_annual"]))
+            m5.metric("Net annual pension — nominal at retirement",
+                      fmt_eur(pension_info["net_annual_nominal"]))
+            # Real equivalent in today's money
+            years_to_pension = pension_info["pension_age"] - p["current_age"]
+            real_equiv_monthly = pension_info["net_monthly_nominal"] / (
+                (1 + p["inflation"]) ** years_to_pension)
+            st.metric("Net monthly pension (÷13) — nominal at retirement",
+                      fmt_eur(pension_info["net_monthly_nominal"]),
+                      help=f"In today's purchasing power ≈ {fmt_eur(real_equiv_monthly)}/month "
+                           f"(deflated {years_to_pension} yrs at {p['inflation']:.1%}/yr)")
         else:
             st.error("Not eligible for INPS state pension — insufficient contribution years (need ≥20)")
 
@@ -923,19 +933,19 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
         st.subheader("📈 Wealth Evolution")
         ages_d = [r["age"] for r in rows]
         fig_dash = go.Figure()
-        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["etf"] for r in rows],
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["etf_real"] for r in rows],
                                       name="ETF", stackgroup="wealth",
                                       line=dict(color="#636EFA")))
-        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["pf"] for r in rows],
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["pf_real"] for r in rows],
                                       name="Pension Fund", stackgroup="wealth",
                                       line=dict(color="#00CC96")))
-        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["bank"] for r in rows],
+        fig_dash.add_trace(go.Scatter(x=ages_d, y=[r["bank_real"] for r in rows],
                                       name="Bank", stackgroup="wealth",
                                       line=dict(color="#FFA15A")))
         fig_dash.add_vline(x=p["stop_working_age"], line_dash="dash", line_color="red",
                            annotation_text="Retire", annotation_position="top right")
         fig_dash.update_layout(
-            title="Total real wealth by component",
+            title="Wealth by component — real (today's €, inflation-adjusted)",
             xaxis_title="Age", yaxis_title="€ real",
             template="plotly_dark", height=380, hovermode="x unified",
         )
@@ -943,17 +953,18 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
 
     st.divider()
 
+    st.caption("All amounts in real terms (today's purchasing power, inflation-adjusted).")
     # Snapshots
     for snap_age, snap_label in [(50, "50"), (p["target_age"], str(p["target_age"]))]:
         row = next((r for r in rows if r["age"] == snap_age), None)
         if row:
-            st.subheader(f"📸 Wealth snapshot at age {snap_label}")
+            st.subheader(f"📸 Wealth snapshot at age {snap_label} (real €)")
             cols = st.columns(4 if p.get("tfr_destination") != "company" else 5)
-            cols[0].metric("Bank", fmt_eur(row["bank"]))
-            cols[1].metric("ETF", fmt_eur(row["etf"]))
-            cols[2].metric("Pension Fund", fmt_eur(row["pf"]))
+            cols[0].metric("Bank (real)", fmt_eur(row["bank_real"]))
+            cols[1].metric("ETF (real)", fmt_eur(row["etf_real"]))
+            cols[2].metric("Pension Fund (real)", fmt_eur(row["pf_real"]))
             if p.get("tfr_destination") == "company":
-                cols[3].metric("TFR (company)", fmt_eur(row.get("tfr_company", 0)))
+                cols[3].metric("TFR (real)", fmt_eur(row.get("tfr_real", 0)))
                 cols[4].metric("Total Real", fmt_eur(row["total_real"]))
             else:
                 cols[3].metric("Total Real", fmt_eur(row["total_real"]))

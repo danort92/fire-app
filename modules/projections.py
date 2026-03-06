@@ -116,10 +116,10 @@ def run_projection(
     rows.append({
         "age": current_age,
         "yr": 0,
-        "bank": bank,
-        "etf": etf,
-        "pf": pf,
-        "tfr_company": tfr_co,
+        "bank": bank, "bank_real": bank,
+        "etf": etf,   "etf_real": etf,
+        "pf": pf,     "pf_real": pf,
+        "tfr_company": tfr_co, "tfr_real": tfr_co,
         "cost_basis": cost_basis,
         "total_nominal": bank + etf + pf + tfr_co,
         "total_real": bank + etf + pf + tfr_co,
@@ -261,10 +261,16 @@ def run_projection(
         rows.append({
             "age": age,
             "yr": yr,
+            # Nominal values (year-of-payment money)
             "bank": round(new_bank, 2),
             "etf": round(new_etf, 2),
             "pf": round(new_pf, 2),
             "tfr_company": round(tfr_co, 2),
+            # Real values (deflated to current_age purchasing power)
+            "bank_real": round(new_bank / inf_cum, 2),
+            "etf_real": round(new_etf / inf_cum, 2),
+            "pf_real": round(new_pf / inf_cum, 2),
+            "tfr_real": round((tfr_co if tfr_destination == "company" else 0.0) / inf_cum, 2),
             "cost_basis": round(new_cost_basis, 2),
             "total_nominal": round(total_nominal, 2),
             "total_real": round(total_real, 2),

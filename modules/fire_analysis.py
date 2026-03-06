@@ -313,6 +313,7 @@ def find_optimal_pac(
     couple_stop_working_age: int = 0,
     early_pension_years: int = 0,
     defer_to_71: bool = False,
+    **_,
 ) -> int:
     """Find minimum monthly PAC (step 100) that achieves the global earliest retirement age."""
     for pac in range(100, 2001, 100):

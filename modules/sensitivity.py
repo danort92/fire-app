@@ -1,14 +1,15 @@
 """
-Sensitivity analysis: how the portfolio value at target age changes as a function
-of monthly PAC and monthly expenses, given a fixed planned retirement age.
+Sensitivity analysis: how the earliest retirement age changes as a function
+of ETF return and monthly expenses.
 """
+from typing import Any, Dict, Optional
 import pandas as pd
 
-from .fire_analysis import run_your_scenario
+from .fire_analysis import find_earliest_retirement
 from .pension_state import calculate_state_pension
 
 
-PAC_DELTAS     = (-0.20, -0.10, 0.0, 0.10, 0.20)
+RETURN_DELTAS = (-0.02, -0.01, 0.0, 0.01, 0.02)
 EXPENSE_DELTAS = (-0.20, -0.10, 0.0, 0.10, 0.20)
 
 
@@ -41,7 +42,6 @@ def run_sensitivity(
     ral_growth: float,
     inps_contribution_rate: float,
     gdp_revaluation_rate: float,
-    stop_working_age: int,
     part_time_monthly_gross: float = 0.0,
     inps_employee_rate: float = 0.0919,
     surcharges_rate: float = 0.02,
@@ -53,67 +53,55 @@ def run_sensitivity(
     couple_stop_working_age: int = 0,
     early_pension_years: int = 0,
     defer_to_71: bool = False,
-    pac_deltas: tuple = PAC_DELTAS,
+    return_deltas: tuple = RETURN_DELTAS,
     expense_deltas: tuple = EXPENSE_DELTAS,
 ) -> pd.DataFrame:
     """
     Run a 5×5 sensitivity grid.
     Rows  = expense variation (%) — index
-    Cols  = monthly PAC variation (%) — columns
-    Values = portfolio real value at target_age (€k), given fixed stop_working_age
+    Cols  = ETF net return variation (pp) — columns
+    Values = earliest retirement age
     """
-    # Pension info depends only on stop_working_age — compute once
-    pension_info = calculate_state_pension(
-        ral=ral, ral_growth=ral_growth,
-        inps_contribution_rate=inps_contribution_rate,
-        gdp_revaluation_rate=gdp_revaluation_rate,
-        current_age=current_age, age_started_working=age_started_working,
-        stop_working_age=stop_working_age, part_time=part_time,
-        part_time_salary=part_time_salary,
-        part_time_until_age=part_time_until_age,
-        net_monthly_salary=net_monthly_salary,
-        age_joined_fund=age_joined_fund,
-        part_time_monthly_gross=part_time_monthly_gross,
-        early_pension_years=early_pension_years,
-        defer_to_71=defer_to_71,
-    )
-    state_pension_net = pension_info["net_annual_nominal"] if pension_info["eligible"] else 0.0
-    p_start_age       = pension_info["pension_age"]
-    contrib_years     = pension_info["contribution_years"]
-
     results = {}
 
     for exp_delta in expense_deltas:
-        exp_label  = f"{exp_delta:+.0%}"
-        row        = {}
+        exp_label = f"{exp_delta:+.0%}"
+        row = {}
         monthly_exp = base_monthly_expenses * (1 + exp_delta)
 
-        for pac_delta in pac_deltas:
-            pac_label = f"{pac_delta:+.0%}"
-            pac       = monthly_pac * (1 + pac_delta)
+        for ret_delta in return_deltas:
+            ret_label = f"{ret_delta:+.1%}"
+            etf_ret = base_etf_net_return + ret_delta
 
-            result = run_your_scenario(
-                current_age=current_age, target_age=target_age,
+            earliest = find_earliest_retirement(
+                current_age=current_age,
+                target_age=target_age,
                 net_monthly_salary=net_monthly_salary,
                 monthly_expenses=monthly_exp,
                 age_started_working=age_started_working,
-                etf_value=etf_value, monthly_pac=pac,
-                etf_net_return=base_etf_net_return,
+                etf_value=etf_value,
+                monthly_pac=monthly_pac,
+                etf_net_return=etf_ret,
                 capital_gains_tax=capital_gains_tax,
-                bank_balance=bank_balance, bank_interest=bank_interest,
-                emergency_fund=emergency_fund, stamp_duty=stamp_duty,
+                bank_balance=bank_balance,
+                bank_interest=bank_interest,
+                emergency_fund=emergency_fund,
+                stamp_duty=stamp_duty,
                 pension_fund_value=pension_fund_value,
                 total_annual_contribution=total_annual_contribution,
                 voluntary_extra=voluntary_extra,
                 pension_fund_return=pension_fund_return,
-                annuity_rate=annuity_rate, age_joined_fund=age_joined_fund,
-                stop_working_age=stop_working_age, part_time=part_time,
+                annuity_rate=annuity_rate,
+                age_joined_fund=age_joined_fund,
+                part_time=part_time,
                 part_time_salary=part_time_salary,
                 part_time_until_age=part_time_until_age,
                 inflation=inflation,
-                state_pension_annual_net=state_pension_net,
-                pension_start_age=p_start_age,
-                contribution_years=contrib_years,
+                pension_start_age=pension_start_age,
+                ral=ral,
+                ral_growth=ral_growth,
+                inps_contribution_rate=inps_contribution_rate,
+                gdp_revaluation_rate=gdp_revaluation_rate,
                 part_time_monthly_gross=part_time_monthly_gross,
                 inps_employee_rate=inps_employee_rate,
                 surcharges_rate=surcharges_rate,
@@ -123,12 +111,14 @@ def run_sensitivity(
                 tfr_revaluation_rate=tfr_revaluation_rate,
                 couple_net_monthly=couple_net_monthly,
                 couple_stop_working_age=couple_stop_working_age,
+                early_pension_years=early_pension_years,
+                defer_to_71=defer_to_71,
             )
-            row[pac_label] = round(result["assets_at_target_real"] / 1_000)
+            row[ret_label] = earliest
 
         results[exp_label] = row
 
     df = pd.DataFrame(results).T
-    df.index.name   = "Expenses Δ"
-    df.columns.name = "PAC Δ"
+    df.index.name = "Expenses Δ"
+    df.columns.name = "ETF Return Δ"
     return df

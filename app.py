@@ -1078,21 +1078,27 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
 # Tab 8: Scenarios & Monte Carlo (unified)  — CLEAN REWRITE
 # ─────────────────────────────────────────────
 def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # noqa: C901
-    st.header("📊 Scenari & Monte Carlo")
-    st.caption(
-        f"Monte Carlo: **{p['mc_scenario']}** · {p['n_simulations']} simulazioni (parametri sidebar). "
-        "Sotto: confronto tra 3 scenari personalizzabili."
+    # ── Header ────────────────────────────────────────────────────────────
+    st.markdown(
+        "<h2 style='margin-bottom:0'>📊 Scenarios &amp; Monte Carlo</h2>"
+        "<p style='color:#9ca3af;margin-top:4px;font-size:0.9rem'>"
+        f"Stochastic engine · <b>{p['mc_scenario']}</b> · {p['n_simulations']:,} simulations · "
+        "base parameters from sidebar &nbsp;|&nbsp; below: three customisable scenarios</p>",
+        unsafe_allow_html=True,
     )
 
-    # Shared computed values
+    # ── Shared derived values ─────────────────────────────────────────────
     etf_net_return = p["expected_gross_return"] - p["ter"] - p["ivafe"]
     tfr_to_fund = p["tfr_contribution"] if p.get("tfr_destination", "fund") == "fund" else 0.0
     total_annual_contribution = tfr_to_fund + p["employer_contribution"] + p["personal_contribution"]
 
-    # ── 1. Monte Carlo — parametri base (sidebar) ─────────────────────────
-    st.subheader("🎲 Monte Carlo — parametri base")
+    # ═══════════════════════════════════════════════════════════════════════
+    # SECTION 1 — Monte Carlo (base parameters)
+    # ═══════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### 🎲 Monte Carlo Simulation — Base Parameters")
 
-    with st.spinner(f"Running {p['n_simulations']} simulations..."):
+    with st.spinner(f"Running {p['n_simulations']:,} simulations…"):
         mc_base = _cached_monte_carlo(
             n_simulations=p["n_simulations"],
             current_age=p["current_age"], target_age=p["target_age"],
@@ -1131,69 +1137,113 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
         )
 
     pct = mc_base["percentiles"]
-    mc1, mc2, mc3 = st.columns(3)
-    mc1.metric("Probabilità solvenza", f"{mc_base['probability_solvent'] * 100:.1f}%")
-    mc2.metric("Età media di rovina (se accade)", f"{mc_base['avg_broke_age']:.1f} anni")
-    mc3.metric(f"Patrimonio mediano (P50) a {p['target_age']}", fmt_eur(pct["p50"][-1]))
-
     ages_mc = mc_base["ages"]
-    fig_mc_base = go.Figure()
-    for lo, hi, color, bname in [
-        ("p5",  "p95", "rgba(99,110,250,0.10)", "P5–P95"),
-        ("p10", "p90", "rgba(99,110,250,0.20)", "P10–P90"),
-        ("p25", "p75", "rgba(99,110,250,0.35)", "P25–P75"),
-    ]:
-        fig_mc_base.add_trace(go.Scatter(
-            x=ages_mc + ages_mc[::-1],
-            y=pct[hi] + pct[lo][::-1],
-            fill="toself", fillcolor=color,
-            line=dict(color="rgba(0,0,0,0)"),
-            name=bname,
+    solvent_pct = mc_base["probability_solvent"] * 100
+    solvent_color = "#00CC96" if solvent_pct >= 90 else ("#FFA500" if solvent_pct >= 70 else "#EF553B")
+
+    # KPI strip
+    kc1, kc2, kc3, kc4 = st.columns(4)
+    kc1.metric("Solvency probability", f"{solvent_pct:.1f}%")
+    kc2.metric("Avg age of ruin (if occurs)",
+               f"{mc_base['avg_broke_age']:.1f}" if solvent_pct < 100 else "—")
+    kc3.metric(f"P50 wealth at {p['target_age']}", fmt_eur(pct["p50"][-1]))
+    kc4.metric(f"P10 wealth at {p['target_age']}", fmt_eur(pct["p10"][-1]))
+
+    # Fan chart
+    _BAND_BLUE = [
+        ("p5",  "p95", "rgba(99,110,250,0.08)", "P5–P95"),
+        ("p10", "p90", "rgba(99,110,250,0.15)", "P10–P90"),
+        ("p25", "p75", "rgba(99,110,250,0.28)", "P25–P75"),
+    ]
+    fig_fan = go.Figure()
+    for lo, hi, fill, label in _BAND_BLUE:
+        fig_fan.add_trace(go.Scatter(
+            x=ages_mc + ages_mc[::-1], y=pct[hi] + pct[lo][::-1],
+            fill="toself", fillcolor=fill,
+            line=dict(color="rgba(0,0,0,0)"), name=label, legendgroup="bands",
         ))
-    fig_mc_base.add_trace(go.Scatter(
-        x=ages_mc, y=pct["p50"], name="Mediana (P50)",
-        line=dict(color="#636EFA", width=2),
+    fig_fan.add_trace(go.Scatter(
+        x=ages_mc, y=pct["p50"], name="Median (P50)",
+        line=dict(color="#818cf8", width=2.5),
+        hovertemplate="Age %{x}<br>Median: %{y:,.0f} €<extra></extra>",
     ))
-    fig_mc_base.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Patrimonio = 0")
-    fig_mc_base.add_vline(x=p["stop_working_age"], line_dash="dash", line_color="orange",
-                          annotation_text=f"Ritiro {p['stop_working_age']}")
-    fig_mc_base.update_layout(
-        title="Monte Carlo: Liquidità reale (Banca + ETF) — parametri base",
-        xaxis_title="Età", yaxis_title="€ reali",
+    fig_fan.add_hrect(y0=min(min(pct["p5"]), 0) * 1.1, y1=0,
+                      fillcolor="rgba(239,68,68,0.06)", line_width=0)
+    fig_fan.add_hline(y=0, line_dash="dot", line_color="rgba(239,68,68,0.7)",
+                      annotation_text="Wealth = 0", annotation_position="bottom right",
+                      annotation_font_color="rgba(239,68,68,0.85)")
+    fig_fan.add_vline(x=p["stop_working_age"], line_dash="dash",
+                      line_color="rgba(251,191,36,0.7)",
+                      annotation_text=f"Retirement · {p['stop_working_age']}",
+                      annotation_font_color="rgba(251,191,36,0.9)")
+    fig_fan.update_layout(
+        title=dict(text="Real Liquid Wealth Distribution (Bank + ETF)", font=dict(size=15)),
+        xaxis=dict(title="Age", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
+        yaxis=dict(title="€ real", showgrid=True, gridcolor="rgba(255,255,255,0.06)",
+                   tickformat=",.0f"),
         template="plotly_dark", hovermode="x unified", height=500,
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0),
+        margin=dict(t=80, b=50),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(15,15,25,1)",
     )
-    st.plotly_chart(fig_mc_base, use_container_width=True)
+    st.plotly_chart(fig_fan, use_container_width=True)
 
-    st.subheader(f"Distribuzione patrimonio terminale (età {p['target_age']})")
-    fig_hist = px.histogram(
-        x=mc_base["terminal_wealth"], nbins=50,
-        labels={"x": "Patrimonio reale (€)", "y": "Simulazioni"},
-        color_discrete_sequence=["#636EFA"],
-        title=f"Distribuzione del patrimonio reale a {p['target_age']} anni",
+    # Terminal wealth histogram + percentile table — side by side
+    hcol, tcol = st.columns([1, 1])
+    with hcol:
+        st.markdown("**Terminal wealth distribution** *(age {})* ".format(p["target_age"]))
+        fig_hist = go.Figure(go.Histogram(
+            x=mc_base["terminal_wealth"], nbinsx=60,
+            marker_color="#818cf8", opacity=0.85,
+            hovertemplate="Wealth: %{x:,.0f} €<br>Count: %{y}<extra></extra>",
+        ))
+        fig_hist.add_vline(x=0, line_dash="dot", line_color="rgba(239,68,68,0.7)")
+        _p10_val = pct["p10"][-1]
+        _p90_val = pct["p90"][-1]
+        for xval, label, col in [(_p10_val, "P10", "#fbbf24"), (_p90_val, "P90", "#34d399")]:
+            fig_hist.add_vline(x=xval, line_dash="dash", line_color=col,
+                               annotation_text=label, annotation_font_color=col)
+        fig_hist.update_layout(
+            template="plotly_dark", height=320, showlegend=False,
+            xaxis=dict(title="Real wealth (€)", tickformat=",.0f",
+                       showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
+            yaxis=dict(title="Simulations", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
+            margin=dict(t=20, b=50),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(15,15,25,1)",
+        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+    with tcol:
+        st.markdown("**Wealth percentiles at key ages**")
+        key_ages = sorted(set(a for a in [
+            p["current_age"], p["stop_working_age"], 60,
+            pension_info["pension_age"], p["target_age"]
+        ] if p["current_age"] <= a <= p["target_age"]))
+        pct_rows = [{
+            "Age": ka,
+            "P5":  fmt_eur(pct["p5"][ages_mc.index(ka)]),
+            "P10": fmt_eur(pct["p10"][ages_mc.index(ka)]),
+            "P25": fmt_eur(pct["p25"][ages_mc.index(ka)]),
+            "P50": fmt_eur(pct["p50"][ages_mc.index(ka)]),
+            "P75": fmt_eur(pct["p75"][ages_mc.index(ka)]),
+            "P90": fmt_eur(pct["p90"][ages_mc.index(ka)]),
+            "P95": fmt_eur(pct["p95"][ages_mc.index(ka)]),
+        } for ka in key_ages if ka in ages_mc]
+        if pct_rows:
+            st.dataframe(pd.DataFrame(pct_rows), use_container_width=True, hide_index=True,
+                         height=320)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # SECTION 2 — Scenario Comparison
+    # ═══════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### 📊 Scenario Comparison")
+    st.markdown(
+        "<p style='color:#9ca3af;font-size:0.87rem'>"
+        "Configure three strategies below. All other parameters (taxes, TFR, couple, etc.) "
+        "are inherited from the sidebar.</p>",
+        unsafe_allow_html=True,
     )
-    fig_hist.add_vline(x=0, line_dash="dash", line_color="red")
-    fig_hist.update_layout(template="plotly_dark", height=350)
-    st.plotly_chart(fig_hist, use_container_width=True)
-
-    st.subheader("Percentili a età chiave — parametri base")
-    key_ages = sorted(set(a for a in [
-        p["current_age"], p["stop_working_age"], 60, pension_info["pension_age"], p["target_age"]
-    ] if p["current_age"] <= a <= p["target_age"]))
-    pct_table = [{
-        "Età": ka,
-        "P5":  fmt_eur(pct["p5"][ages_mc.index(ka)]),
-        "P25": fmt_eur(pct["p25"][ages_mc.index(ka)]),
-        "P50": fmt_eur(pct["p50"][ages_mc.index(ka)]),
-        "P75": fmt_eur(pct["p75"][ages_mc.index(ka)]),
-        "P95": fmt_eur(pct["p95"][ages_mc.index(ka)]),
-    } for ka in key_ages if ka in ages_mc]
-    if pct_table:
-        st.dataframe(pd.DataFrame(pct_table), use_container_width=True, hide_index=True)
-
-    # ── 2. Definisci i 3 scenari ──────────────────────────────────────────
-    st.divider()
-    st.subheader("📊 Definisci i 3 scenari")
-    base_etf = etf_net_return
 
     _base = dict(
         current_age=p["current_age"], target_age=p["target_age"],
@@ -1217,49 +1267,53 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
         couple_net_monthly=p.get("couple_net_monthly", 0.0),
         couple_stop_working_age=p.get("couple_stop_working_age", 0),
     )
-
-    scol1, scol2, scol3 = st.columns(3)
-    with scol1:
-        st.markdown("**Scenario A**")
-        a_name   = st.text_input("Name A", "Conservativo (ritiro tardivo)", key="smc_a_name")
-        a_retire = st.number_input("Retire age", p["current_age"] + 1, 70,
-                       min(65, p["stop_working_age"] + 5), key="smc_a_retire")
-        a_pac    = st.number_input("Monthly PAC (€)", 0, 10_000, int(p["monthly_pac"]), step=50, key="smc_a_pac")
-        a_exp    = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="smc_a_exp")
-        a_etf    = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="smc_a_etf") / 100
-        a_infl   = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="smc_a_infl") / 100
-        a_ral    = st.number_input("RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="smc_a_ral")
-    with scol2:
-        st.markdown("**Scenario B** (Base)")
-        b_name   = st.text_input("Name B", "Base scenario", key="smc_b_name")
-        b_retire = st.number_input("Retire age", p["current_age"] + 1, 70,
-                       p["stop_working_age"], key="smc_b_retire")
-        b_pac    = st.number_input("Monthly PAC (€)", 0, 10_000, int(p["monthly_pac"]), step=50, key="smc_b_pac")
-        b_exp    = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="smc_b_exp")
-        b_etf    = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="smc_b_etf") / 100
-        b_infl   = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="smc_b_infl") / 100
-        b_ral    = st.number_input("RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="smc_b_ral")
-    with scol3:
-        st.markdown("**Scenario C**")
-        c_name   = st.text_input("Name C", "Aggressivo (ritiro anticipato)", key="smc_c_name")
-        c_retire = st.number_input("Retire age", p["current_age"] + 1, 70,
-                       max(p["current_age"] + 1, p["stop_working_age"] - 5), key="smc_c_retire")
-        c_pac    = st.number_input("Monthly PAC (€)", 0, 10_000,
-                       min(10_000, int(p["monthly_pac"]) + 200), step=50, key="smc_c_pac")
-        c_exp    = st.number_input("Monthly expenses (€)", 500, 20_000, int(monthly_expenses), step=100, key="smc_c_exp")
-        c_etf    = st.number_input("ETF net return (%)", 0.0, 20.0, round(base_etf * 100, 2), step=0.1, key="smc_c_etf") / 100
-        c_infl   = st.number_input("Inflation (%)", 0.0, 10.0, round(p["inflation"] * 100, 1), step=0.1, key="smc_c_infl") / 100
-        c_ral    = st.number_input("RAL (€)", 10_000, 500_000, int(p["ral"]), step=1_000, key="smc_c_ral")
-
-    scenarios = [
-        (a_name, a_retire, a_pac, a_exp, a_etf, a_infl, a_ral),
-        (b_name, b_retire, b_pac, b_exp, b_etf, b_infl, b_ral),
-        (c_name, c_retire, c_pac, c_exp, c_etf, c_infl, c_ral),
+    base_etf = etf_net_return
+    _SC_COLORS  = ["#EF553B", "#636EFA", "#00CC96"]
+    _SC_BADGES  = [
+        "<span style='background:#EF553B22;color:#EF553B;padding:2px 8px;border-radius:4px;font-size:0.8rem'>A</span>",
+        "<span style='background:#636EFA22;color:#636EFA;padding:2px 8px;border-radius:4px;font-size:0.8rem'>B</span>",
+        "<span style='background:#00CC9622;color:#00CC96;padding:2px 8px;border-radius:4px;font-size:0.8rem'>C</span>",
     ]
 
-    with st.spinner("Calcolo 3 scenari deterministici..."):
+    # Input grid — compact
+    scol1, scol2, scol3 = st.columns(3)
+    sc_inputs = []
+    for col, badge, letter, def_retire, def_pac in zip(
+        [scol1, scol2, scol3], _SC_BADGES,
+        ["A", "B", "C"],
+        [min(65, p["stop_working_age"] + 5), p["stop_working_age"],
+         max(p["current_age"] + 1, p["stop_working_age"] - 5)],
+        [int(p["monthly_pac"]), int(p["monthly_pac"]), min(10_000, int(p["monthly_pac"]) + 200)],
+    ):
+        with col:
+            st.markdown(f"{badge}", unsafe_allow_html=True)
+            k = f"smc_{letter.lower()}"
+            _name   = st.text_input("Label", {
+                "A": "Conservative — late retirement",
+                "B": "Base scenario",
+                "C": "Aggressive — early retirement",
+            }[letter], key=f"{k}_name", label_visibility="collapsed")
+            st.caption("Label")
+            _retire = st.number_input("Retirement age", p["current_age"] + 1, 70,
+                                       def_retire, key=f"{k}_retire")
+            _pac    = st.number_input("Monthly PAC (€)", 0, 10_000, def_pac,
+                                       step=50, key=f"{k}_pac")
+            _exp    = st.number_input("Monthly expenses (€)", 500, 20_000,
+                                       int(monthly_expenses), step=100, key=f"{k}_exp")
+            _etf    = st.number_input("ETF net return (%)", 0.0, 20.0,
+                                       round(base_etf * 100, 2), step=0.1,
+                                       key=f"{k}_etf") / 100
+            _infl   = st.number_input("Inflation (%)", 0.0, 10.0,
+                                       round(p["inflation"] * 100, 1), step=0.1,
+                                       key=f"{k}_infl") / 100
+            _ral    = st.number_input("Gross salary RAL (€)", 10_000, 500_000,
+                                       int(p["ral"]), step=1_000, key=f"{k}_ral")
+            sc_inputs.append((_name, _retire, _pac, _exp, _etf, _infl, _ral))
+
+    # Run deterministic
+    with st.spinner("Computing 3 scenarios…"):
         sc_results = []
-        for name, retire_age, pac, sc_exp, sc_etf, sc_infl, sc_ral in scenarios:
+        for name, retire_age, pac, sc_exp, sc_etf, sc_infl, sc_ral in sc_inputs:
             p_info = calculate_state_pension(
                 ral=sc_ral, ral_growth=p["ral_growth"],
                 inps_contribution_rate=p["inps_contribution_rate"],
@@ -1276,8 +1330,7 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
                 base_vecchiaia_age=p.get("vecchiaia_age", 67),
             )
             rs = run_your_scenario(
-                monthly_pac=pac,
-                stop_working_age=retire_age,
+                monthly_pac=pac, stop_working_age=retire_age,
                 state_pension_annual_net=p_info["net_annual_nominal"] if p_info["eligible"] else 0.0,
                 pension_start_age=p_info["pension_age"],
                 contribution_years=p_info["contribution_years"],
@@ -1295,57 +1348,69 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
                 "final_wealth": rs["assets_at_target_real"],
             })
 
-    # ── 3. Metriche chiave deterministiche ───────────────────────────────
-    st.subheader("Metriche chiave")
-    cols = st.columns(3)
-    for res, col in zip(sc_results, cols):
-        with col:
-            st.markdown(f"**{res['name']}**")
-            st.metric("Retire age", res["retire_age"])
-            st.metric("Monthly PAC", fmt_eur(res["pac"]))
-            st.metric("Monthly expenses", fmt_eur(res["expenses"]))
-            st.metric("ETF net return", fmt_pct(res["etf"]))
-            st.metric("Inflation", fmt_pct(res["inflation"]))
-            st.metric("RAL", fmt_eur(res["ral"]))
-            st.metric("Status", "✅ Solvent" if res["solvent"] else "❌ Broke")
-            st.metric(f"Real wealth at {p['target_age']}", fmt_eur(res["final_wealth"]))
-            st.metric("State pension age", res["pension_age"])
-            st.metric("State pension/year", fmt_eur(res["pension_net"]))
+    # ── Parameter summary table ───────────────────────────────────────────
+    st.markdown("#### Parameters & Outcomes")
+    param_rows = []
+    _param_keys = [
+        ("Retirement age", "retire_age", lambda v: str(v)),
+        ("Monthly PAC", "pac", fmt_eur),
+        ("Monthly expenses", "expenses", fmt_eur),
+        ("ETF net return", "etf", fmt_pct),
+        ("Inflation", "inflation", fmt_pct),
+        ("Gross salary (RAL)", "ral", fmt_eur),
+        ("State pension age", "pension_age", lambda v: str(v)),
+        ("State pension / yr", "pension_net", fmt_eur),
+        (f"Real wealth at {p['target_age']}", "final_wealth", fmt_eur),
+        ("Status", "solvent", lambda v: "✅ Solvent" if v else "❌ Depleted"),
+    ]
+    for label, key, fmt_fn in _param_keys:
+        row = {"Parameter": label}
+        for res in sc_results:
+            row[res["name"]] = fmt_fn(res[key])
+        param_rows.append(row)
+    st.dataframe(pd.DataFrame(param_rows), use_container_width=True, hide_index=True)
 
-    # ── 4. Grafico deterministico ─────────────────────────────────────────
-    colors_sc = ["#EF553B", "#636EFA", "#00CC96"]
+    # ── Wealth evolution chart ────────────────────────────────────────────
+    st.markdown("#### Wealth Evolution — Deterministic")
     fig_det = go.Figure()
-    for res, color in zip(sc_results, colors_sc):
+    for res, color in zip(sc_results, _SC_COLORS):
         fig_det.add_trace(go.Scatter(
             x=[r["age"] for r in res["rows"]],
             y=[r["total_real"] for r in res["rows"]],
-            name=res["name"], line=dict(color=color, width=2),
+            name=res["name"],
+            line=dict(color=color, width=2.5),
+            hovertemplate=f"<b>{res['name']}</b><br>Age %{{x}}<br>%{{y:,.0f}} €<extra></extra>",
         ))
-    fig_det.add_hline(y=0, line_dash="dash", line_color="white")
+    fig_det.add_hline(y=0, line_dash="dot", line_color="rgba(239,68,68,0.6)")
     fig_det.update_layout(
-        title="Patrimonio reale totale nel tempo — 3 scenari (deterministico)",
-        xaxis_title="Età", yaxis_title="€ reali",
-        template="plotly_dark", hovermode="x unified", height=450,
+        xaxis=dict(title="Age", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
+        yaxis=dict(title="€ real (total wealth)", showgrid=True,
+                   gridcolor="rgba(255,255,255,0.06)", tickformat=",.0f"),
+        template="plotly_dark", hovermode="x unified", height=420,
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0),
+        margin=dict(t=60, b=50),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(15,15,25,1)",
     )
     st.plotly_chart(fig_det, use_container_width=True)
 
-    # ── 5. Confronto MC tra scenari (solo tabella) ────────────────────────
-    st.divider()
-    st.subheader("📋 Confronto Monte Carlo tra scenari")
-    st.caption(
-        f"Stesso seed casuale (CRN) — differenze riflettono i parametri, non il rumore. "
-        f"Simulazioni: min({p['n_simulations']}, 500)."
+    # ── MC scenario comparison ────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 🎲 Monte Carlo — Scenario Comparison")
+    st.markdown(
+        "<p style='color:#9ca3af;font-size:0.87rem'>"
+        f"Common Random Numbers (seed=42) — differences reflect parameters, not noise. "
+        f"Simulations per scenario: min({p['n_simulations']:,}, 500).</p>",
+        unsafe_allow_html=True,
     )
     run_mc_cmp = st.checkbox(
-        "Calcola Monte Carlo per i 3 scenari?",
-        value=False,
-        key="smc_run_mc",
-        help="Avvia N simulazioni per scenario (N da sidebar, massimo 500).",
+        "Run Monte Carlo for all 3 scenarios",
+        value=False, key="smc_run_mc",
+        help="Runs stochastic simulations for each custom scenario using the same random seed.",
     )
     if run_mc_cmp:
         _n_sim = min(p["n_simulations"], 500)
         mc_sc_list = []
-        with st.spinner(f"Running {_n_sim} × 3 scenari (stesso seed = CRN)…"):
+        with st.spinner(f"Running {_n_sim:,} × 3 scenarios…"):
             for res in sc_results:
                 mc_sc_list.append(_cached_monte_carlo(
                     n_simulations=_n_sim,
@@ -1384,19 +1449,46 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
                     couple_net_monthly=p.get("couple_net_monthly", 0.0),
                     couple_stop_working_age=p.get("couple_stop_working_age", 0),
                 ))
-        rows_mc = []
+
+        # Summary KPIs per scenario
+        sk_cols = st.columns(3)
+        for res, mc_r, col, color in zip(sc_results, mc_sc_list, sk_cols, _SC_COLORS):
+            with col:
+                sp = mc_r["probability_solvent"] * 100
+                sp_icon = "🟢" if sp >= 90 else ("🟡" if sp >= 70 else "🔴")
+                ruin_str = "—" if sp >= 100 else f"{mc_r['avg_broke_age']:.0f}"
+                st.markdown(
+                    f"<div style='border-left:3px solid {color};padding-left:10px'>"
+                    f"<b>{res['name']}</b><br>"
+                    f"{sp_icon} Solvency: <b>{sp:.1f}%</b> &nbsp;|&nbsp; "
+                    f"Avg ruin age: <b>{ruin_str}</b>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Transposed percentile table: rows = percentiles, cols = scenarios
+        st.markdown(f"#### Terminal wealth at age {p['target_age']} — full percentile distribution")
+        _PCT_LABELS = [
+            ("p5",  "P5  — Worst 5%"),
+            ("p10", "P10 — Stress"),
+            ("p25", "P25 — Bear"),
+            ("p50", "P50 — Median"),
+            ("p75", "P75 — Bull"),
+            ("p90", "P90 — Strong"),
+            ("p95", "P95 — Best 5%"),
+        ]
+        pct_cmp_rows = []
+        for pkey, plabel in _PCT_LABELS:
+            row = {"Percentile": plabel}
+            for res, mc_r in zip(sc_results, mc_sc_list):
+                row[res["name"]] = fmt_eur(mc_r["percentiles"][pkey][-1])
+            pct_cmp_rows.append(row)
+        # Append solvency row
+        sol_row = {"Percentile": "P(Solvency)"}
         for res, mc_r in zip(sc_results, mc_sc_list):
-            _p = mc_r["percentiles"]
-            rows_mc.append({
-                "Scenario": res["name"],
-                "Età ritiro": res["retire_age"],
-                "P(solvenza)": f"{mc_r['probability_solvent'] * 100:.1f}%",
-                "Età media rovina": f"{mc_r['avg_broke_age']:.0f}" if mc_r["probability_solvent"] < 1.0 else "—",
-                f"P10 a {p['target_age']}": fmt_eur(_p["p10"][-1]),
-                f"P50 a {p['target_age']}": fmt_eur(_p["p50"][-1]),
-                f"P90 a {p['target_age']}": fmt_eur(_p["p90"][-1]),
-            })
-        st.dataframe(pd.DataFrame(rows_mc), use_container_width=True, hide_index=True)
+            sol_row[res["name"]] = f"{mc_r['probability_solvent'] * 100:.1f}%"
+        pct_cmp_rows.insert(0, sol_row)
+        st.dataframe(pd.DataFrame(pct_cmp_rows), use_container_width=True, hide_index=True)
 
 
 # ─────────────────────────────────────────────

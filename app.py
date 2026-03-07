@@ -699,7 +699,7 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
 # ─────────────────────────────────────────────
 # Tab 5: State Pension & Pension Fund
 # ─────────────────────────────────────────────
-def tab_pension(p, net_monthly_salary, pension_info, tax_result):
+def tab_pension(p, net_monthly_salary, pension_info, tax_result, rows):
     st.header("🏛️ State Pension (INPS) & Supplementary Pension Fund")
 
     # ── SECTION 1: INPS State Pension ────────────────────────────────────
@@ -806,6 +806,32 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
 
     pf_tax_age = pension_fund_tax_rate(pension_info["pension_age"], p["age_joined_fund"])
     st.caption(f"Pension fund payout tax rate at age {pension_info['pension_age']}: {fmt_pct(pf_tax_age)}")
+
+    # ── Annuity payout at retirement ─────────────────────────────────────
+    _stop = p["stop_working_age"]
+    _pf_row = next((r for r in rows if r["age"] == _stop), None)
+    if _pf_row is not None:
+        _display_real = st.session_state.get("display_real", True)
+        _pf_val_nom = _pf_row.get("pf", 0.0)
+        _pf_val_real = _pf_row.get("pf_real", _pf_val_nom)
+        _pf_val = _pf_val_real if _display_real else _pf_val_nom
+        _mode_lbl = "real" if _display_real else "nominal"
+
+        _gross_ann = _pf_val * p["annuity_rate"]
+        _net_ann   = _gross_ann * (1 - pf_tax_age)
+        _gross_mo  = _gross_ann / 12
+        _net_mo    = _net_ann  / 12
+
+        st.markdown(f"#### 💰 Estimated annuity (rendita) at retirement age {_stop} — {_mode_lbl} €")
+        st.caption(
+            f"Fund value at {_stop}: {fmt_eur(_pf_val)} × annuity rate {fmt_pct(p['annuity_rate'])} "
+            f"× (1 − tax {fmt_pct(pf_tax_age)})"
+        )
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("Gross annual", fmt_eur(_gross_ann))
+        a2.metric("Net annual",   fmt_eur(_net_ann))
+        a3.metric("Gross monthly", fmt_eur(_gross_mo, 2))
+        a4.metric("Net monthly",   fmt_eur(_net_mo,   2))
 
     st.markdown("---")
     st.markdown("### ⚖️ NPV Comparison: Pension Fund vs ETF")
@@ -1615,7 +1641,7 @@ def main():
         tab_fire_results(p, float(net_monthly_salary), monthly_expenses_val, pension_info, tax_result)
 
     with tabs[4]:
-        tab_pension(p, float(net_monthly_salary), pension_info, tax_result)
+        tab_pension(p, float(net_monthly_salary), pension_info, tax_result, rows)
 
     with tabs[5]:
         tab_dashboard(p, tax_result, monthly_expenses_val, pension_info, rows)

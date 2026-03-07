@@ -617,12 +617,15 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
         )
 
     solvent = scenario_result["solvent_to_target"]
-    assets_at_target = scenario_result["assets_at_target_real"]
     eff_pac = scenario_result["effective_avg_monthly_pac"]
+    display_real = st.session_state.get("display_real", True)
+    _tgt_row = next((r for r in scenario_result["rows"] if r["age"] == p["target_age"]), {})
+    assets_at_target = _tgt_row.get("total_real" if display_real else "total_nominal", 0.0)
+    _wealth_label = f"{'Real' if display_real else 'Nominal'} wealth at {p['target_age']}"
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Solvent to target age?", "✅ Yes" if solvent else "❌ No")
-    col2.metric(f"Real wealth at {p['target_age']}", fmt_eur(assets_at_target))
+    col2.metric(_wealth_label, fmt_eur(assets_at_target))
     col3.metric("Effective avg monthly PAC", fmt_eur(eff_pac, 2))
 
     st.divider()
@@ -656,7 +659,7 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
     col_b.metric("Optimal monthly PAC (minimum for FIRE)", fmt_eur(optimal_pac))
 
     st.divider()
-    st.subheader("Real wealth at target age for different retirement ages")
+    st.subheader(f"{'Real' if display_real else 'Nominal'} wealth at target age for different retirement ages")
     test_ages = list(range(max(p["current_age"] + 1, 38), 66, 2))
 
     with st.spinner("Running scenario sweep..."):
@@ -685,24 +688,28 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
                 contribution_years=p_info["contribution_years"],
                 **_common,
             )
+            _sw_tgt = next((r for r in rs["rows"] if r["age"] == p["target_age"]), {})
             sweep_data.append({
                 "Retirement age": test_age,
-                "Real wealth (€)": rs["assets_at_target_real"],
+                "wealth_real": _sw_tgt.get("total_real", 0.0),
+                "wealth_nominal": _sw_tgt.get("total_nominal", 0.0),
                 "Solvent": rs["solvent_to_target"],
             })
 
     df_sweep = pd.DataFrame(sweep_data)
+    _sw_col = "wealth_real" if display_real else "wealth_nominal"
+    _sw_label = f"{'Real' if display_real else 'Nominal'} wealth at {p['target_age']} (€)"
     colors = ["#00CC96" if s else "#EF553B" for s in df_sweep["Solvent"]]
     fig_sweep = go.Figure(go.Bar(
-        x=df_sweep["Retirement age"], y=df_sweep["Real wealth (€)"],
+        x=df_sweep["Retirement age"], y=df_sweep[_sw_col],
         marker_color=colors,
-        text=[fmt_eur(v) for v in df_sweep["Real wealth (€)"]],
+        text=[fmt_eur(v) for v in df_sweep[_sw_col]],
         textposition="outside",
     ))
     fig_sweep.add_hline(y=0, line_dash="dash", line_color="white")
     fig_sweep.update_layout(
-        title="Real wealth at target age vs retirement age (green=solvent, red=broke)",
-        xaxis_title="Retirement age", yaxis_title="€ real",
+        title=f"{'Real' if display_real else 'Nominal'} wealth at {p['target_age']} vs retirement age (green=solvent, red=broke)",
+        xaxis_title="Retirement age", yaxis_title=_sw_label,
         template="plotly_dark", height=400,
     )
     st.plotly_chart(fig_sweep, use_container_width=True)
@@ -738,12 +745,35 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
 
         years_to_pension = pension_info["pension_age"] - p["current_age"]
         deflator = (1 + p["inflation"]) ** years_to_pension
+        display_real = st.session_state.get("display_real", True)
 
-        # Derived real values
-        gross_annual_real   = pension_info["gross_annual"]   / deflator
-        net_annual_real     = pension_info["net_annual_nominal"] / deflator
-        gross_monthly_real  = gross_annual_real / 13
-        net_monthly_real    = net_annual_real   / 13
+        # Derived values
+        gross_annual_nom   = pension_info["gross_annual"]
+        net_annual_nom     = pension_info["net_annual_nominal"]
+        gross_monthly_nom  = gross_annual_nom / 13
+        net_monthly_nom    = pension_info["net_monthly_nominal"]
+        gross_annual_real  = gross_annual_nom  / deflator
+        net_annual_real    = net_annual_nom    / deflator
+        gross_monthly_real = gross_annual_real / 13
+        net_monthly_real   = net_annual_real   / 13
+
+        if display_real:
+            _g_ann, _n_ann = gross_annual_real, net_annual_real
+            _g_mo,  _n_mo  = gross_monthly_real, net_monthly_real
+            _mode_note = (
+                f"Showing <b>real</b> values — today's purchasing power "
+                f"(deflated {years_to_pension} yrs at {p['inflation']:.1%}/yr). "
+                f"Nominal at pension age: gross {fmt_eur(gross_annual_nom)}/yr · "
+                f"net {fmt_eur(net_annual_nom)}/yr."
+            )
+        else:
+            _g_ann, _n_ann = gross_annual_nom, net_annual_nom
+            _g_mo,  _n_mo  = gross_monthly_nom, net_monthly_nom
+            _mode_note = (
+                f"Showing <b>nominal</b> values — future money at pension age {pension_info['pension_age']}. "
+                f"Real equivalent today: gross {fmt_eur(gross_annual_real)}/yr · "
+                f"net {fmt_eur(net_annual_real)}/yr."
+            )
 
         # Row 1: key facts
         k1, k2, k3 = st.columns(3)
@@ -752,33 +782,16 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
         k3.metric("Pension pot (montante)", fmt_eur(pension_info["montante"]),
                   help="Accumulated INPS virtual pot on which the coefficient is applied")
 
-        st.markdown("---")
         st.markdown(
-            "<p style='color:#9ca3af;font-size:0.85rem'>"
-            f"<b>Nominal</b> = future money at pension age (age {pension_info['pension_age']}). &nbsp;"
-            f"<b>Real</b> = today's purchasing power (deflated {years_to_pension} yrs "
-            f"at {p['inflation']:.1%}/yr).</p>",
+            f"<p style='color:#9ca3af;font-size:0.85rem'>{_mode_note}</p>",
             unsafe_allow_html=True,
         )
 
-        # Two-column: Nominal | Real
-        ncol, rcol = st.columns(2)
-        with ncol:
-            st.markdown("**Nominal (future €)**")
-            n1, n2 = st.columns(2)
-            n1.metric("Gross annual", fmt_eur(pension_info["gross_annual"]))
-            n2.metric("Net annual", fmt_eur(pension_info["net_annual_nominal"]))
-            n3, n4 = st.columns(2)
-            n3.metric("Gross monthly (÷13)", fmt_eur(pension_info["gross_annual"] / 13))
-            n4.metric("Net monthly (÷13)", fmt_eur(pension_info["net_monthly_nominal"]))
-        with rcol:
-            st.markdown("**Real (today's purchasing power)**")
-            r1, r2 = st.columns(2)
-            r1.metric("Gross annual", fmt_eur(gross_annual_real))
-            r2.metric("Net annual", fmt_eur(net_annual_real))
-            r3, r4 = st.columns(2)
-            r3.metric("Gross monthly (÷13)", fmt_eur(gross_monthly_real))
-            r4.metric("Net monthly (÷13)", fmt_eur(net_monthly_real))
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Gross annual", fmt_eur(_g_ann))
+        p2.metric("Net annual", fmt_eur(_n_ann))
+        p3.metric("Gross monthly (÷13)", fmt_eur(_g_mo))
+        p4.metric("Net monthly (÷13)", fmt_eur(_n_mo))
 
     # ── SECTION 2: Supplementary Pension Fund ────────────────────────────
     st.markdown("---")
@@ -1367,6 +1380,7 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
                 **{**_base, "monthly_expenses": sc_exp, "etf_net_return": sc_etf,
                    "inflation": sc_infl, "ral": sc_ral},
             )
+            _sc_tgt = next((r for r in rs["rows"] if r["age"] == p["target_age"]), {})
             sc_results.append({
                 "name": name, "retire_age": retire_age, "pac": pac,
                 "expenses": sc_exp, "etf": sc_etf, "inflation": sc_infl, "ral": sc_ral,
@@ -1375,10 +1389,14 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
                 "contribution_years": p_info["contribution_years"],
                 "rows": rs["rows"],
                 "solvent": rs["solvent_to_target"],
-                "final_wealth": rs["assets_at_target_real"],
+                "final_wealth_real": _sc_tgt.get("total_real", 0.0),
+                "final_wealth_nominal": _sc_tgt.get("total_nominal", 0.0),
             })
 
     # ── Parameter summary table ───────────────────────────────────────────
+    _display_real = st.session_state.get("display_real", True)
+    _wealth_key = "final_wealth_real" if _display_real else "final_wealth_nominal"
+    _wealth_label = f"{'Real' if _display_real else 'Nominal'} wealth at {p['target_age']}"
     st.markdown("#### Parameters & Outcomes")
     param_rows = []
     _param_keys = [
@@ -1390,7 +1408,7 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
         ("Gross salary (RAL)", "ral", fmt_eur),
         ("State pension age", "pension_age", lambda v: str(v)),
         ("State pension / yr", "pension_net", fmt_eur),
-        (f"Real wealth at {p['target_age']}", "final_wealth", fmt_eur),
+        (_wealth_label, _wealth_key, fmt_eur),
         ("Status", "solvent", lambda v: "✅ Solvent" if v else "❌ Depleted"),
     ]
     for label, key, fmt_fn in _param_keys:
@@ -1401,12 +1419,14 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
     st.dataframe(pd.DataFrame(param_rows), use_container_width=True, hide_index=True)
 
     # ── Wealth evolution chart ────────────────────────────────────────────
-    st.markdown("#### Wealth Evolution — Deterministic")
+    _det_col = "total_real" if _display_real else "total_nominal"
+    _det_ylabel = f"€ {'real' if _display_real else 'nominal'} (total wealth)"
+    st.markdown(f"#### Wealth Evolution — Deterministic ({'Real' if _display_real else 'Nominal'})")
     fig_det = go.Figure()
     for res, color in zip(sc_results, _SC_COLORS):
         fig_det.add_trace(go.Scatter(
             x=[r["age"] for r in res["rows"]],
-            y=[r["total_real"] for r in res["rows"]],
+            y=[r[_det_col] for r in res["rows"]],
             name=res["name"],
             line=dict(color=color, width=2.5),
             hovertemplate=f"<b>{res['name']}</b><br>Age %{{x}}<br>%{{y:,.0f}} €<extra></extra>",
@@ -1414,7 +1434,7 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
     fig_det.add_hline(y=0, line_dash="dot", line_color="rgba(239,68,68,0.6)")
     fig_det.update_layout(
         xaxis=dict(title="Age", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
-        yaxis=dict(title="€ real (total wealth)", showgrid=True,
+        yaxis=dict(title=_det_ylabel, showgrid=True,
                    gridcolor="rgba(255,255,255,0.06)", tickformat=",.0f"),
         template="plotly_dark", hovermode="x unified", height=420,
         legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0),

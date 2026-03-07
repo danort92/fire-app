@@ -71,6 +71,38 @@ def _cached_sensitivity(**kwargs):
     return run_sensitivity(**kwargs)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_etf_info(ticker: str) -> dict:
+    try:
+        import yfinance as yf
+        return yf.Ticker(ticker).info or {}
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_etf_history(ticker: str) -> "pd.DataFrame":
+    try:
+        import yfinance as yf
+        return yf.Ticker(ticker).history(period="5y", interval="1mo")
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_etf_funds_data(ticker: str) -> dict:
+    result: dict = {"top_holdings": None, "sector_weightings": None, "asset_classes": None}
+    try:
+        import yfinance as yf
+        fd = yf.Ticker(ticker).funds_data
+        result["top_holdings"]      = fd.top_holdings
+        result["sector_weightings"] = fd.sector_weightings
+        result["asset_classes"]     = fd.asset_classes
+    except Exception:
+        pass
+    return result
+
+
 # ─────────────────────────────────────────────
 # Sidebar
 # ─────────────────────────────────────────────
@@ -1552,6 +1584,242 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
 
 
 # ─────────────────────────────────────────────
+# Tab 9: ETF Explorer
+# ─────────────────────────────────────────────
+def tab_etf():
+    from modules.etf_data import (
+        search_etfs, build_display_df,
+        get_asset_classes, get_issuers, get_domiciles,
+    )
+
+    st.header("📈 ETF Explorer")
+    st.caption(
+        "Curated catalogue of EU-listed ETFs popular among Italian FIRE investors. "
+        "Select any ETF to fetch live NAV, AUM, yield, holdings and allocation via yfinance."
+    )
+
+    # ── Search & Filter ───────────────────────────────────────────────────
+    st.markdown("### 🔍 Search & Filter")
+    f1, f2, f3, f4 = st.columns([3, 2, 2, 2])
+    with f1:
+        query = st.text_input(
+            "Search by name, ISIN, ticker, benchmark…",
+            placeholder="e.g. VWCE, IE00BK5BQT80, MSCI World",
+            key="etf_query",
+        )
+    with f2:
+        selected_ac = st.multiselect("Asset class", get_asset_classes(), key="etf_ac")
+    with f3:
+        selected_issuers = st.multiselect("Issuer / Provider", get_issuers(), key="etf_issuer")
+    with f4:
+        selected_domiciles = st.multiselect("Domicile", get_domiciles(), key="etf_domicile")
+
+    dist_filter = st.radio(
+        "Distribution policy", ["All", "Accumulating", "Distributing"],
+        index=0, horizontal=True, key="etf_dist",
+    )
+    dist_policies = None if dist_filter == "All" else [dist_filter]
+
+    matching = search_etfs(
+        query=query,
+        asset_classes=selected_ac or None,
+        issuers=selected_issuers or None,
+        domiciles=selected_domiciles or None,
+        dist_policies=dist_policies,
+    )
+    st.caption(f"{len(matching)} ETF{'s' if len(matching) != 1 else ''} found")
+
+    if not matching:
+        st.info("No ETFs match the current filters.")
+        return
+
+    # ── Results table ─────────────────────────────────────────────────────
+    st.markdown("### 📋 Results")
+    st.dataframe(build_display_df(matching), use_container_width=True, hide_index=True)
+
+    # ── ETF detail selector ───────────────────────────────────────────────
+    st.divider()
+    st.markdown("### 🔎 Detailed View — Live Data")
+
+    etf_labels = [f"{e['ticker']}  ·  {e['name']}" for e in matching]
+    selected_label = st.selectbox("Select an ETF", etf_labels, index=0, key="etf_detail")
+    etf = matching[etf_labels.index(selected_label)]
+    ticker_str = etf["ticker"]
+
+    # Static metadata strip
+    sm1, sm2, sm3, sm4, sm5 = st.columns(5)
+    sm1.metric("TER", f"{etf['ter'] * 100:.2f}%")
+    sm2.metric("Asset Class", etf["asset_class"])
+    sm3.metric("Issuer", etf["issuer"])
+    sm4.metric("Domicile", etf["domicile"])
+    sm5.metric("Policy", etf["dist_policy"])
+    st.caption(f"Benchmark: {etf['benchmark']}  ·  ISIN: {etf['isin']}")
+
+    # ── Live data fetch ───────────────────────────────────────────────────
+    st.markdown("#### Live data (yfinance · cached 1 h)")
+    with st.spinner(f"Fetching {ticker_str}…"):
+        info       = _cached_etf_info(ticker_str)
+        history_df = _cached_etf_history(ticker_str)
+        funds      = _cached_etf_funds_data(ticker_str)
+
+    if not info:
+        st.warning(
+            f"yfinance returned no data for **{ticker_str}**. "
+            "EU-listed tickers may occasionally time out — try again or check the ISIN on the issuer's site."
+        )
+    else:
+        aum        = info.get("totalAssets")
+        nav        = info.get("navPrice") or info.get("previousClose")
+        etf_yield  = info.get("yield")
+        ytd_return = info.get("ytdReturn")
+        live_ter   = info.get("annualReportExpenseRatio")
+        currency   = info.get("currency", "")
+        wk52_hi    = info.get("fiftyTwoWeekHigh")
+        wk52_lo    = info.get("fiftyTwoWeekLow")
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("AUM", f"${aum / 1e9:.2f} B" if aum else "N/A",
+                  help="Total assets under management in USD (Yahoo Finance)")
+        k2.metric("NAV / Price", f"{nav:.4f} {currency}" if nav else "N/A")
+        k3.metric("12-month Yield", f"{etf_yield * 100:.2f}%" if etf_yield else "N/A")
+        k4.metric("YTD Return", f"{ytd_return * 100:.2f}%" if ytd_return else "N/A")
+
+        if wk52_hi and wk52_lo:
+            w1, w2 = st.columns(2)
+            w1.metric("52-week High", f"{wk52_hi:.2f} {currency}")
+            w2.metric("52-week Low",  f"{wk52_lo:.2f} {currency}")
+
+        if live_ter is not None:
+            delta = live_ter - etf["ter"]
+            st.caption(
+                f"Live TER (yfinance): {live_ter * 100:.2f}% — "
+                f"{'matches catalogue' if abs(delta) < 0.0001 else f'differs {delta * 100:+.2f}% from catalogue'}"
+            )
+
+    # ── 5-year price history ──────────────────────────────────────────────
+    st.markdown("#### 📈 5-Year Monthly Price History")
+    if not history_df.empty and "Close" in history_df.columns:
+        fig_hist = go.Figure()
+        fig_hist.add_trace(go.Scatter(
+            x=history_df.index, y=history_df["Close"],
+            name="Monthly Close",
+            line=dict(color="#636EFA", width=2),
+            hovertemplate="%{x|%b %Y}<br>%{y:.4f}<extra></extra>",
+        ))
+        fig_hist.update_layout(
+            title=f"{ticker_str} — 5-Year Monthly Close",
+            xaxis_title="Date",
+            yaxis_title=f"Price ({info.get('currency', '') if info else ''})",
+            template="plotly_dark", height=350, hovermode="x unified",
+        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+    else:
+        st.info("Price history unavailable for this ticker.")
+
+    # ── Holdings & Allocation ─────────────────────────────────────────────
+    st.markdown("#### 🧩 Holdings & Allocation")
+    st.caption(
+        "Holdings data sourced from yfinance. Not all EU ETFs expose full holdings — "
+        "refer to the issuer's website for authoritative data."
+    )
+
+    h_col, c_col = st.columns(2)
+
+    with h_col:
+        top = funds.get("top_holdings")
+        if top is not None and not top.empty:
+            st.markdown("**Top Holdings**")
+            h_df = top.copy()
+            rename = {}
+            if "holdingName"    in h_df.columns: rename["holdingName"]    = "Holding"
+            if "symbol"         in h_df.columns: rename["symbol"]         = "Symbol"
+            if "holdingPercent" in h_df.columns:
+                rename["holdingPercent"] = "Weight %"
+                h_df["holdingPercent"] = (h_df["holdingPercent"] * 100).round(2)
+            h_df = h_df.rename(columns=rename)
+            st.dataframe(h_df[[v for v in rename.values() if v in h_df.columns]],
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("Top holdings not available for this ETF.")
+
+    with c_col:
+        view = st.radio(
+            "Allocation view", ["Sector weights", "Asset allocation"],
+            horizontal=True, key="etf_alloc_view",
+        )
+        sector_data = funds.get("sector_weightings")
+        asset_data  = funds.get("asset_classes")
+
+        if view == "Sector weights" and sector_data:
+            try:
+                if isinstance(sector_data, list):
+                    pairs = [(d.get("type", "?"), d.get("recentTW", 0) * 100) for d in sector_data]
+                elif isinstance(sector_data, dict):
+                    pairs = [(k, v * 100) for k, v in sector_data.items()]
+                else:
+                    raise ValueError
+                pairs = [(l, v) for l, v in pairs if v > 0.01]
+                if pairs:
+                    labels, values = zip(*pairs)
+                    fig_pie = go.Figure(go.Pie(
+                        labels=list(labels), values=list(values),
+                        hole=0.40, textinfo="label+percent",
+                        hovertemplate="%{label}<br>%{value:.2f}%<extra></extra>",
+                    ))
+                    fig_pie.update_layout(
+                        title="Sector Allocation", template="plotly_dark", height=380,
+                        legend=dict(orientation="v", x=1.0, y=0.5),
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.info("No non-zero sector weights available.")
+            except Exception:
+                st.info("Sector weights could not be parsed.")
+
+        elif view == "Asset allocation" and asset_data:
+            try:
+                label_map = {
+                    "cashPosition":       "Cash",
+                    "stockPosition":      "Equity",
+                    "bondPosition":       "Bonds",
+                    "otherPosition":      "Other",
+                    "preferredPosition":  "Preferred",
+                    "convertiblePosition":"Convertible",
+                }
+                raw = asset_data if isinstance(asset_data, dict) else (
+                    asset_data.to_dict() if hasattr(asset_data, "to_dict") else {}
+                )
+                labels = [lbl for k, lbl in label_map.items() if (raw.get(k) or 0) > 0.0001]
+                values = [raw.get(k, 0) * 100 for k, lbl in label_map.items()
+                          if (raw.get(k) or 0) > 0.0001]
+                if labels:
+                    fig_bar = go.Figure(go.Bar(
+                        x=labels, y=values,
+                        marker_color=["#636EFA","#FFA15A","#00CC96","#AB63FA","#EF553B","#19D3F3"][:len(labels)],
+                        text=[f"{v:.1f}%" for v in values], textposition="outside",
+                    ))
+                    fig_bar.update_layout(
+                        title="Asset Allocation", yaxis_title="Weight (%)",
+                        template="plotly_dark", height=350, showlegend=False,
+                    )
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                else:
+                    st.info("Asset allocation not available.")
+            except Exception:
+                st.info("Asset allocation could not be parsed.")
+        else:
+            st.info("Allocation data not available for this ETF via yfinance.")
+
+    # ── Use TER in FIRE model ─────────────────────────────────────────────
+    st.divider()
+    st.markdown("#### 🔥 Use This ETF's TER in Your FIRE Model")
+    st.info(
+        f"This ETF has **TER {etf['ter'] * 100:.2f}%**. "
+        f"Update the *Annual TER (%)* field in the sidebar ← to use it in all projections."
+    )
+
+
+# ─────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────
 def main():
@@ -1624,7 +1892,7 @@ def main():
     tabs = st.tabs([
         "💸 Expenses", "💰 Salary", "📊 Projections", "🔥 FIRE",
         "🏛️ Pension & NPV", "📋 Dashboard",
-        "🔬 Sensitivity", "📊 Scenarios & MC",
+        "🔬 Sensitivity", "📊 Scenarios & MC", "📈 ETF Explorer",
     ])
 
     with tabs[0]:
@@ -1651,6 +1919,9 @@ def main():
 
     with tabs[7]:
         tab_scenarios_mc(p, float(net_monthly_salary), monthly_expenses_val, pension_info)
+
+    with tabs[8]:
+        tab_etf()
 
 
 if __name__ == "__main__":

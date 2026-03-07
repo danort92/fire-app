@@ -499,13 +499,20 @@ def tab_projections(p, net_monthly_salary, monthly_expenses, pension_info, rows)
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Detailed Table")
-    display_cols = ["age", "bank_real", "etf_real", "pf_real", "total_real", "bank", "etf", "pf", "total_nominal"]
-    col_names    = ["Age", "Bank real (€)", "ETF real (€)", "Pension Fund real (€)", "Total Real (€)",
-                    "Bank nominal (€)", "ETF nominal (€)", "Pension Fund nominal (€)", "Total Nominal (€)"]
-    if show_tfr:
-        display_cols.insert(4, "tfr_real")
-        col_names.insert(4, "TFR real (€)")
+    _tbl_mode = "Real (today's €)" if display_real else "Nominal (future €)"
+    st.subheader(f"Detailed Table — {_tbl_mode}")
+    if display_real:
+        display_cols = ["age", "bank_real", "etf_real", "pf_real", "total_real"]
+        col_names    = ["Age", "Bank (€)", "ETF (€)", "Pension Fund (€)", "Total (€)"]
+        if show_tfr:
+            display_cols.insert(4, "tfr_real")
+            col_names.insert(4, "TFR (€)")
+    else:
+        display_cols = ["age", "bank", "etf", "pf", "total_nominal"]
+        col_names    = ["Age", "Bank (€)", "ETF (€)", "Pension Fund (€)", "Total (€)"]
+        if show_tfr:
+            display_cols.insert(4, "tfr_company")
+            col_names.insert(4, "TFR (€)")
 
     df_display = df[display_cols].copy()
     df_display.columns = col_names
@@ -899,13 +906,25 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
     fire_number = monthly_expenses * 12 / p["swr"]
     current_liquid = p["etf_value"] + p["bank_balance"] - p["emergency_fund"]
 
+    _dash_real = st.session_state.get("display_real", True)
+    if pension_info["eligible"]:
+        _yrs_to_pen = pension_info["pension_age"] - p["current_age"]
+        _pen_annual = (
+            pension_info["net_annual_nominal"] / (1 + p["inflation"]) ** _yrs_to_pen
+            if _dash_real else pension_info["net_annual_nominal"]
+        )
+        _pen_label = f"INPS pension / year ({'real' if _dash_real else 'nominal'})"
+    else:
+        _pen_annual = None
+        _pen_label = "INPS pension / year"
+
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Net monthly income", fmt_eur(total_income_monthly),
                help="Primary + partner net monthly income" if couple_mo > 0 else "Net monthly salary")
     c2.metric("Monthly expenses", fmt_eur(monthly_expenses, 2))
     c3.metric("Monthly savings", fmt_eur(monthly_savings))
     c4.metric("Savings rate", fmt_pct(savings_rate))
-    c5.metric("INPS pension / year", fmt_eur(pension_info["net_annual_nominal"]) if pension_info["eligible"] else "N/A")
+    c5.metric(_pen_label, fmt_eur(_pen_annual) if _pen_annual is not None else "N/A")
 
     st.divider()
 

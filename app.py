@@ -571,7 +571,8 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
     fc1, fc2, fc3, fc4 = st.columns(4)
     fc1.metric("FIRE Number", fmt_eur(fire_number),
                help=f"Annual expenses / SWR = {fmt_eur(annual_expenses)} / {fmt_pct(p['swr'])}")
-    fc2.metric("Current liquid wealth", fmt_eur(current_liquid))
+    fc2.metric("Current liquid wealth", fmt_eur(current_liquid),
+               help=f"ETF ({fmt_eur(p['etf_value'])}) + Bank ({fmt_eur(p['bank_balance'])}) − Emergency fund ({fmt_eur(p['emergency_fund'])})")
     fc3.metric("FIRE progress", f"{progress_pct:.1f}%")
     fc4.metric("Savings rate", fmt_pct(savings_rate))
     st.progress(int(min(100, progress_pct)))
@@ -713,80 +714,106 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
 def tab_pension(p, net_monthly_salary, pension_info, tax_result):
     st.header("🏛️ State Pension (INPS) & Supplementary Pension Fund")
 
-    col1, col2 = st.columns(2)
+    # ── SECTION 1: INPS State Pension ────────────────────────────────────
+    st.markdown("### 🏛️ INPS State Pension — Contributory Method")
 
-    with col1:
-        st.subheader("INPS State Pension (Contributory Method)")
-        early_yrs = p.get("early_pension_years", 0)
-        if early_yrs > 0:
-            st.info(f"Early pension enabled: threshold {early_yrs} contribution years")
-        if p.get("defer_to_71"):
-            st.info("Pension deferred to age 71 for maximum INPS coefficient")
-
-        st.caption("⚠️ Figures are **nominal** (future money at pension age). "
-                   "IRPEF-taxed. Supplementary fund shown separately →")
-        if p.get("le_adjustment") and not p.get("defer_to_71") and not p.get("early_pension_years"):
-            _adj = p.get("vecchiaia_age", 67) - 67
-            st.info(
-                f"Life expectancy adjustment active: standard pension age shifted from 67 to "
-                f"**{p.get('vecchiaia_age', 67)}** (+{_adj} yr). "
-                f"Based on ISTAT +3 months per 2-year period (Riforma Fornero)."
-            )
-        if pension_info["eligible"]:
-            st.success(f"Eligible for state pension at age **{pension_info['pension_age']}**")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("INPS pension age", f"{pension_info['pension_age']} yrs")
-            m2.metric("Contribution years", pension_info["contribution_years"])
-            m3.metric("Pension pot (montante)", fmt_eur(pension_info["montante"]))
-            m4, m5 = st.columns(2)
-            m4.metric("Gross annual pension — nominal at retirement",
-                      fmt_eur(pension_info["gross_annual"]))
-            m5.metric("Net annual pension — nominal at retirement",
-                      fmt_eur(pension_info["net_annual_nominal"]))
-            # Real equivalent in today's money
-            years_to_pension = pension_info["pension_age"] - p["current_age"]
-            real_equiv_monthly = pension_info["net_monthly_nominal"] / (
-                (1 + p["inflation"]) ** years_to_pension)
-            st.metric("Net monthly pension (÷13) — nominal at retirement",
-                      fmt_eur(pension_info["net_monthly_nominal"]),
-                      help=f"In today's purchasing power ≈ {fmt_eur(real_equiv_monthly)}/month "
-                           f"(deflated {years_to_pension} yrs at {p['inflation']:.1%}/yr)")
-        else:
-            st.error("Not eligible for INPS state pension — insufficient contribution years (need ≥20)")
-
-    with col2:
-        st.subheader("Supplementary Pension Fund")
-        tfr_to_fund = p["tfr_contribution"] if p.get("tfr_destination", "fund") == "fund" else 0.0
-        pf_info = calculate_pension_fund_info(
-            current_value=p["pf_value"],
-            tfr_contribution=tfr_to_fund,
-            employer_contribution=p["employer_contribution"],
-            personal_contribution=p["personal_contribution"],
-            voluntary_extra=p["voluntary_extra"],
-            max_deductible=p["max_deductible"],
-            fund_return=p["fund_return"],
-            annuity_rate=p["annuity_rate"],
-            age_joined=p["age_joined_fund"],
-            taxable_income=tax_result["taxable_income"],
+    # Info banners
+    early_yrs = p.get("early_pension_years", 0)
+    if early_yrs > 0:
+        st.info(f"Early pension enabled: threshold {early_yrs} contribution years")
+    if p.get("defer_to_71"):
+        st.info("Pension deferred to age 71 for maximum INPS coefficient")
+    if p.get("le_adjustment") and not p.get("defer_to_71") and not p.get("early_pension_years"):
+        _adj = p.get("vecchiaia_age", 67) - 67
+        st.info(
+            f"Life expectancy adjustment active: standard pension age shifted from 67 to "
+            f"**{p.get('vecchiaia_age', 67)}** (+{_adj} yr). "
+            f"Based on ISTAT +3 months per 2-year period (Riforma Fornero)."
         )
-        m1, m2 = st.columns(2)
-        m1.metric("Total base annual contribution", fmt_eur(pf_info["total_base_contribution"]))
-        m2.metric("With voluntary extra", fmt_eur(pf_info["total_with_voluntary"]))
-        m3, m4 = st.columns(2)
-        m3.metric("Deductible amount", fmt_eur(pf_info["actual_deductible"]))
-        m4.metric("Annual tax saving", fmt_eur(pf_info["tax_savings"]))
 
-        if p.get("tfr_destination") == "company":
-            st.warning(
-                f"TFR stays with employer — not flowing into the pension fund. "
-                f"TFR accrual: ~{fmt_eur(p['ral']/13.5, 0)}/year"
-            )
+    if not pension_info["eligible"]:
+        st.error("Not eligible for INPS state pension — insufficient contribution years (need ≥20)")
+    else:
+        st.success(f"Eligible for state pension at age **{pension_info['pension_age']}**")
 
-        pf_tax_age = pension_fund_tax_rate(pension_info["pension_age"], p["age_joined_fund"])
-        st.caption(f"Pension fund payout tax rate at age {pension_info['pension_age']}: {fmt_pct(pf_tax_age)}")
+        years_to_pension = pension_info["pension_age"] - p["current_age"]
+        deflator = (1 + p["inflation"]) ** years_to_pension
 
-    st.divider()
-    st.subheader("⚖️ NPV Comparison: Pension Fund vs ETF")
+        # Derived real values
+        gross_annual_real   = pension_info["gross_annual"]   / deflator
+        net_annual_real     = pension_info["net_annual_nominal"] / deflator
+        gross_monthly_real  = gross_annual_real / 13
+        net_monthly_real    = net_annual_real   / 13
+
+        # Row 1: key facts
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Pension age", f"{pension_info['pension_age']} yrs")
+        k2.metric("Contribution years at retirement", pension_info["contribution_years"])
+        k3.metric("Pension pot (montante)", fmt_eur(pension_info["montante"]),
+                  help="Accumulated INPS virtual pot on which the coefficient is applied")
+
+        st.markdown("---")
+        st.markdown(
+            "<p style='color:#9ca3af;font-size:0.85rem'>"
+            f"<b>Nominal</b> = future money at pension age (age {pension_info['pension_age']}). &nbsp;"
+            f"<b>Real</b> = today's purchasing power (deflated {years_to_pension} yrs "
+            f"at {p['inflation']:.1%}/yr).</p>",
+            unsafe_allow_html=True,
+        )
+
+        # Two-column: Nominal | Real
+        ncol, rcol = st.columns(2)
+        with ncol:
+            st.markdown("**Nominal (future €)**")
+            n1, n2 = st.columns(2)
+            n1.metric("Gross annual", fmt_eur(pension_info["gross_annual"]))
+            n2.metric("Net annual", fmt_eur(pension_info["net_annual_nominal"]))
+            n3, n4 = st.columns(2)
+            n3.metric("Gross monthly (÷13)", fmt_eur(pension_info["gross_annual"] / 13))
+            n4.metric("Net monthly (÷13)", fmt_eur(pension_info["net_monthly_nominal"]))
+        with rcol:
+            st.markdown("**Real (today's purchasing power)**")
+            r1, r2 = st.columns(2)
+            r1.metric("Gross annual", fmt_eur(gross_annual_real))
+            r2.metric("Net annual", fmt_eur(net_annual_real))
+            r3, r4 = st.columns(2)
+            r3.metric("Gross monthly (÷13)", fmt_eur(gross_monthly_real))
+            r4.metric("Net monthly (÷13)", fmt_eur(net_monthly_real))
+
+    # ── SECTION 2: Supplementary Pension Fund ────────────────────────────
+    st.markdown("---")
+    st.markdown("### 💼 Supplementary Pension Fund")
+    tfr_to_fund = p["tfr_contribution"] if p.get("tfr_destination", "fund") == "fund" else 0.0
+    pf_info = calculate_pension_fund_info(
+        current_value=p["pf_value"],
+        tfr_contribution=tfr_to_fund,
+        employer_contribution=p["employer_contribution"],
+        personal_contribution=p["personal_contribution"],
+        voluntary_extra=p["voluntary_extra"],
+        max_deductible=p["max_deductible"],
+        fund_return=p["fund_return"],
+        annuity_rate=p["annuity_rate"],
+        age_joined=p["age_joined_fund"],
+        taxable_income=tax_result["taxable_income"],
+    )
+    m1, m2 = st.columns(2)
+    m1.metric("Total base annual contribution", fmt_eur(pf_info["total_base_contribution"]))
+    m2.metric("With voluntary extra", fmt_eur(pf_info["total_with_voluntary"]))
+    m3, m4 = st.columns(2)
+    m3.metric("Deductible amount", fmt_eur(pf_info["actual_deductible"]))
+    m4.metric("Annual tax saving", fmt_eur(pf_info["tax_savings"]))
+
+    if p.get("tfr_destination") == "company":
+        st.warning(
+            f"TFR stays with employer — not flowing into the pension fund. "
+            f"TFR accrual: ~{fmt_eur(p['ral']/13.5, 0)}/year"
+        )
+
+    pf_tax_age = pension_fund_tax_rate(pension_info["pension_age"], p["age_joined_fund"])
+    st.caption(f"Pension fund payout tax rate at age {pension_info['pension_age']}: {fmt_pct(pf_tax_age)}")
+
+    st.markdown("---")
+    st.markdown("### ⚖️ NPV Comparison: Pension Fund vs ETF")
 
     contrib_yrs_npv = max(1, p["stop_working_age"] - p["current_age"])
     dormant_yrs_npv = max(0, pension_info["pension_age"] - p["stop_working_age"])
@@ -1170,12 +1197,15 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
     fig_fan.add_hrect(y0=min(min(pct["p5"]), 0) * 1.1, y1=0,
                       fillcolor="rgba(239,68,68,0.06)", line_width=0)
     fig_fan.add_hline(y=0, line_dash="dot", line_color="rgba(239,68,68,0.7)",
-                      annotation_text="Wealth = 0", annotation_position="bottom right",
-                      annotation_font_color="rgba(239,68,68,0.85)")
+                      annotation_text="Wealth = 0", annotation_position="bottom left",
+                      annotation_font_color="rgba(239,68,68,0.85)",
+                      annotation_font_size=11)
     fig_fan.add_vline(x=p["stop_working_age"], line_dash="dash",
                       line_color="rgba(251,191,36,0.7)",
                       annotation_text=f"Retirement · {p['stop_working_age']}",
-                      annotation_font_color="rgba(251,191,36,0.9)")
+                      annotation_position="top right",
+                      annotation_font_color="rgba(251,191,36,0.9)",
+                      annotation_font_size=11)
     fig_fan.update_layout(
         title=dict(text="Real Liquid Wealth Distribution (Bank + ETF)", font=dict(size=15)),
         xaxis=dict(title="Age", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
@@ -1566,7 +1596,7 @@ def main():
     tabs = st.tabs([
         "💸 Expenses", "💰 Salary", "📊 Projections", "🔥 FIRE",
         "🏛️ Pension & NPV", "📋 Dashboard",
-        "🔬 Sensitivity", "📊 Scenari & MC",
+        "🔬 Sensitivity", "📊 Scenarios & MC",
     ])
 
     with tabs[0]:

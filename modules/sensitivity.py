@@ -107,8 +107,6 @@ def run_sensitivity(
     tfr_annual_accrual: float = 0.0,
     tfr_company_value: float = 0.0,
     tfr_revaluation_rate: float = 0.015,
-    couple_net_monthly: float = 0.0,
-    couple_stop_working_age: int = 0,
     early_pension_years: int = 0,
     defer_to_71: bool = False,
     # ── Sensitivity config ────────────────────────────────────────────────
@@ -154,8 +152,6 @@ def run_sensitivity(
         tfr_annual_accrual=tfr_annual_accrual,
         tfr_company_value=tfr_company_value,
         tfr_revaluation_rate=tfr_revaluation_rate,
-        couple_net_monthly=couple_net_monthly,
-        couple_stop_working_age=couple_stop_working_age,
         early_pension_years=early_pension_years,
         defer_to_71=defer_to_71,
     )

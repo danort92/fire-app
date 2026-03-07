@@ -154,8 +154,6 @@ def run_monte_carlo(
     tfr_annual_accrual: float = 0.0,
     tfr_company_value: float = 0.0,
     tfr_revaluation_rate: float = 0.015,
-    couple_net_monthly: float = 0.0,
-    couple_stop_working_age: int = 0,
 ) -> Dict[str, Any]:
     """
     Run Monte Carlo simulation.
@@ -229,8 +227,6 @@ def run_monte_carlo(
             tfr_annual_accrual=tfr_annual_accrual,
             tfr_company_value=tfr_company_value,
             tfr_revaluation_rate=tfr_revaluation_rate,
-            couple_net_monthly=couple_net_monthly,
-            couple_stop_working_age=couple_stop_working_age,
         )
 
         # Extract liquid real assets per year

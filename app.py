@@ -100,8 +100,6 @@ def sidebar_inputs():
     f = D["fire_scenario"]
     mc = D["monte_carlo"]
     po = D["pension_options"]
-    cp = D["couple"]
-
     with st.sidebar.expander("👤 Personal", expanded=True):
         current_age = st.number_input("Current age", 18, 70, p["current_age"])
         target_age = st.number_input("Target age (end of simulation)", 70, 100, p["target_age"])
@@ -231,19 +229,6 @@ def sidebar_inputs():
         else:
             vecchiaia_age = 67
 
-    with st.sidebar.expander("👫 Couple mode"):
-        couple_enabled = st.checkbox("Add partner income?", value=cp.get("enabled", False))
-        if couple_enabled:
-            couple_net_monthly = st.number_input("Partner net monthly income (€)", 0, 20000,
-                int(cp.get("partner_net_monthly", 1500)), step=100,
-                help="Partner's net monthly income (after tax). Added to household cash flow while they are working.")
-            couple_stop_working_age = st.number_input("Partner stops working at age", int(current_age) + 1, 70,
-                int(cp.get("partner_stop_working_age", 0) or int(stop_working_age)),
-                help="Age at which partner stops working (0 = same as primary earner).")
-        else:
-            couple_net_monthly = 0.0
-            couple_stop_working_age = 0
-
     with st.sidebar.expander("🎲 Monte Carlo"):
         n_simulations = st.number_input("Number of simulations", 100, 5000, mc["n_simulations"], step=100)
         etf_vol_pct = st.number_input("ETF annual volatility (%)", 5.0, 40.0,
@@ -285,8 +270,6 @@ def sidebar_inputs():
         "part_time_until_age": int(part_time_until_age), "swr": swr_pct / 100,
         "defer_to_71": bool(defer_to_71), "early_pension_years": int(early_pension_years),
         "le_adjustment": bool(le_adjustment), "vecchiaia_age": int(vecchiaia_age),
-        "couple_net_monthly": float(couple_net_monthly),
-        "couple_stop_working_age": int(couple_stop_working_age),
         "n_simulations": int(n_simulations), "etf_volatility": etf_vol_pct / 100,
         "pf_volatility": pf_vol_pct / 100, "inflation_std": inflation_std_pct / 100,
         "mc_scenario": mc_scenario,
@@ -567,13 +550,6 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
     progress_pct = min(100.0, current_liquid / fire_number * 100) if fire_number > 0 else 0.0
     savings = float(net_monthly_salary) - monthly_expenses
     savings_rate = savings / float(net_monthly_salary) if net_monthly_salary > 0 else 0.0
-    if p.get("couple_net_monthly", 0) > 0:
-        couple_annual = p["couple_net_monthly"] * 12
-        savings += p["couple_net_monthly"]
-        savings_rate = (float(net_monthly_salary) + p["couple_net_monthly"] - monthly_expenses) / (
-            float(net_monthly_salary) + p["couple_net_monthly"]
-        )
-
     st.subheader("🎯 FIRE Number")
     fc1, fc2, fc3, fc4 = st.columns(4)
     fc1.metric("FIRE Number", fmt_eur(fire_number),
@@ -607,8 +583,6 @@ def tab_fire_results(p, net_monthly_salary, monthly_expenses, pension_info, tax_
         tfr_annual_accrual=tfr_accrual,
         tfr_company_value=p.get("tfr_company_value", 0.0),
         tfr_revaluation_rate=0.015,
-        couple_net_monthly=p.get("couple_net_monthly", 0.0),
-        couple_stop_working_age=p.get("couple_stop_working_age", 0),
         early_pension_years=p.get("early_pension_years", 0),
         defer_to_71=p.get("defer_to_71", False),
     )
@@ -816,6 +790,7 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
         age_joined=p["age_joined_fund"],
         taxable_income=tax_result["taxable_income"],
     )
+    st.caption("Current-year contributions — today's € (toggle has no effect here).")
     m1, m2 = st.columns(2)
     m1.metric("Total base annual contribution", fmt_eur(pf_info["total_base_contribution"]))
     m2.metric("With voluntary extra", fmt_eur(pf_info["total_with_voluntary"]))
@@ -865,9 +840,13 @@ def tab_pension(p, net_monthly_salary, pension_info, tax_result):
         capital_gains_tax=p["capital_gains_tax"],
     )
 
+    st.caption(
+        f"NPVs are discounted at your inflation rate ({p['inflation']:.1%}/yr) → always in today's € "
+        f"(toggle has no effect here)."
+    )
     col_n1, col_n2, col_n3 = st.columns(3)
-    col_n1.metric("NPV Pension Fund", fmt_eur(npv_result["pension_fund_npv"], 2))
-    col_n2.metric("NPV ETF", fmt_eur(npv_result["etf_npv"], 2))
+    col_n1.metric("NPV Pension Fund (today's €)", fmt_eur(npv_result["pension_fund_npv"], 2))
+    col_n2.metric("NPV ETF (today's €)", fmt_eur(npv_result["etf_npv"], 2))
     col_n3.metric("NPV Difference", fmt_eur(npv_result["npv_difference"], 2),
                    help=f"Winner: {npv_result['winner']}")
 
@@ -899,8 +878,7 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
     st.header("📋 Summary Dashboard")
 
     net_mo = tax_result["net_monthly_13"]
-    couple_mo = p.get("couple_net_monthly", 0.0)
-    total_income_monthly = float(net_mo) + float(couple_mo)
+    total_income_monthly = float(net_mo)
     monthly_savings = total_income_monthly - monthly_expenses
     savings_rate = monthly_savings / total_income_monthly if total_income_monthly > 0 else 0.0
     fire_number = monthly_expenses * 12 / p["swr"]
@@ -920,7 +898,7 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Net monthly income", fmt_eur(total_income_monthly),
-               help="Primary + partner net monthly income" if couple_mo > 0 else "Net monthly salary")
+               help="Net monthly salary")
     c2.metric("Monthly expenses", fmt_eur(monthly_expenses, 2))
     c3.metric("Monthly savings", fmt_eur(monthly_savings))
     c4.metric("Savings rate", fmt_pct(savings_rate))
@@ -1013,11 +991,6 @@ def tab_dashboard(p, tax_result, monthly_expenses, pension_info, rows):
                 else:
                     cols[3].metric("Total", fmt_eur(row["total_nominal"]))
 
-    if p.get("couple_net_monthly", 0) > 0:
-        st.info(
-            f"Partner income: {fmt_eur(p['couple_net_monthly'])}/month included until age "
-            f"{p.get('couple_stop_working_age') or p['stop_working_age']}."
-        )
     if tax_result.get("trattamento_integrativo", 0) > 0:
         ti = tax_result["trattamento_integrativo"]
         st.success(f"Tax Bonus (Trattamento Integrativo): +{fmt_eur(ti)}/year applied to your IRPEF.")
@@ -1078,8 +1051,6 @@ def tab_sensitivity(p, net_monthly_salary, monthly_expenses, pension_info):
             tfr_destination=p.get("tfr_destination", "fund"),
             tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
             tfr_company_value=p.get("tfr_company_value", 0.0),
-            couple_net_monthly=p.get("couple_net_monthly", 0.0),
-            couple_stop_working_age=p.get("couple_stop_working_age", 0),
             early_pension_years=p.get("early_pension_years", 0),
             defer_to_71=p.get("defer_to_71", False),
             x_var=x_var,
@@ -1191,8 +1162,6 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
             tfr_destination=p.get("tfr_destination", "fund"),
             tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
             tfr_company_value=p.get("tfr_company_value", 0.0),
-            couple_net_monthly=p.get("couple_net_monthly", 0.0),
-            couple_stop_working_age=p.get("couple_stop_working_age", 0),
         )
 
     pct = mc_base["percentiles"]
@@ -1302,7 +1271,7 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
     st.markdown("### 📊 Scenario Comparison")
     st.markdown(
         "<p style='color:#9ca3af;font-size:0.87rem'>"
-        "Configure three strategies below. All other parameters (taxes, TFR, couple, etc.) "
+        "Configure three strategies below. All other parameters (taxes, TFR, etc.) "
         "are inherited from the sidebar.</p>",
         unsafe_allow_html=True,
     )
@@ -1326,8 +1295,6 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
         tfr_destination=p.get("tfr_destination", "fund"),
         tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
         tfr_company_value=p.get("tfr_company_value", 0.0),
-        couple_net_monthly=p.get("couple_net_monthly", 0.0),
-        couple_stop_working_age=p.get("couple_stop_working_age", 0),
     )
     base_etf = etf_net_return
     _SC_COLORS  = ["#EF553B", "#636EFA", "#00CC96"]
@@ -1515,8 +1482,6 @@ def tab_scenarios_mc(p, net_monthly_salary, monthly_expenses, pension_info):  # 
                     tfr_destination=p.get("tfr_destination", "fund"),
                     tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
                     tfr_company_value=p.get("tfr_company_value", 0.0),
-                    couple_net_monthly=p.get("couple_net_monthly", 0.0),
-                    couple_stop_working_age=p.get("couple_stop_working_age", 0),
                 ))
 
         # Summary KPIs per scenario
@@ -1567,7 +1532,7 @@ def main():
     st.title("🔥 FIRE Planning Tool — Italian Financial Independence Calculator")
     st.caption(
         "Models IRPEF 2025 (incl. Trattamento Integrativo), INPS contributory pension, "
-        "supplementary pension fund, TFR, couple mode. "
+        "supplementary pension fund, TFR. "
         "All projections in real (inflation-adjusted) terms where noted."
     )
 
@@ -1628,8 +1593,6 @@ def main():
         tfr_destination=p.get("tfr_destination", "fund"),
         tfr_annual_accrual=p["ral"] / 13.5 if p.get("tfr_destination") == "company" else 0.0,
         tfr_company_value=p.get("tfr_company_value", 0.0),
-        couple_net_monthly=p.get("couple_net_monthly", 0.0),
-        couple_stop_working_age=p.get("couple_stop_working_age", 0),
     )
 
     tabs = st.tabs([

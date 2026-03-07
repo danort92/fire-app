@@ -5,7 +5,6 @@ Ages current_age → target_age.
 New in v2:
 - Part-time income taxed via IRPEF (if part_time_monthly_gross provided)
 - TFR in azienda option: accumulates separately, paid out at stop_working_age
-- Couple mode: adds partner net income during working phase
 """
 from typing import List, Dict, Any, Optional
 
@@ -81,8 +80,6 @@ def run_projection(
     tfr_annual_accrual: float = 0.0,         # annual TFR accrual (RAL/13.5) if company
     tfr_company_value: float = 0.0,          # existing TFR in company at current_age
     tfr_revaluation_rate: float = 0.015,     # base TFR revaluation (1.5% + 75%*infl)
-    couple_net_monthly: float = 0.0,         # partner net monthly income
-    couple_stop_working_age: int = 0,        # partner stop age (0 = same as user)
     etf_returns: Optional[List[float]] = None,
     inflation_factors: Optional[List[float]] = None,
 ) -> List[Dict[str, Any]]:
@@ -99,9 +96,6 @@ def run_projection(
         )
     else:
         pt_net_annual = part_time_salary * 12  # treat entered value as net
-
-    # Resolve partner stop age
-    _couple_stop = couple_stop_working_age if couple_stop_working_age > 0 else stop_working_age
 
     # TFR revaluation including inflation component: 1.5% + 75% * inflation
     _tfr_rev = tfr_revaluation_rate + 0.75 * inflation
@@ -142,7 +136,6 @@ def run_projection(
 
         is_working = age < stop_working_age
         is_pt = part_time and (stop_working_age <= age < part_time_until_age)
-        partner_working = couple_net_monthly > 0 and age < _couple_stop
 
         # ── Inflation / ETF return ─────────────────────────────────────────
         if inflation_factors is not None:
@@ -188,8 +181,7 @@ def run_projection(
         bank_grow = bank * (1 + bank_interest) - stamp_duty
 
         if is_working:
-            partner_income = couple_net_monthly * 12 if partner_working else 0.0
-            salary = net_monthly_salary * 12 + partner_income
+            salary = net_monthly_salary * 12
             cash_avail = salary - expenses_annual
 
             bank_before_pac = bank_grow + cash_avail

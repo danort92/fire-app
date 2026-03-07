@@ -41,7 +41,7 @@ def _build_projection_kwargs(
     state_pension_annual_net, pension_start_age, contribution_years,
     part_time_monthly_gross=0.0, inps_employee_rate=0.0919, surcharges_rate=0.02,
     tfr_destination="fund", tfr_annual_accrual=0.0, tfr_company_value=0.0,
-    tfr_revaluation_rate=0.015, couple_net_monthly=0.0, couple_stop_working_age=0,
+    tfr_revaluation_rate=0.015,
 ) -> dict:
     return dict(
         current_age=current_age, target_age=target_age,
@@ -62,7 +62,6 @@ def _build_projection_kwargs(
         inps_employee_rate=inps_employee_rate, surcharges_rate=surcharges_rate,
         tfr_destination=tfr_destination, tfr_annual_accrual=tfr_annual_accrual,
         tfr_company_value=tfr_company_value, tfr_revaluation_rate=tfr_revaluation_rate,
-        couple_net_monthly=couple_net_monthly, couple_stop_working_age=couple_stop_working_age,
     )
 
 
@@ -101,8 +100,6 @@ def run_your_scenario(
     tfr_annual_accrual: float = 0.0,
     tfr_company_value: float = 0.0,
     tfr_revaluation_rate: float = 0.015,
-    couple_net_monthly: float = 0.0,
-    couple_stop_working_age: int = 0,
     **_,
 ) -> dict:
     """Run the user's chosen scenario and compute summary stats."""
@@ -125,7 +122,6 @@ def run_your_scenario(
         inps_employee_rate=inps_employee_rate, surcharges_rate=surcharges_rate,
         tfr_destination=tfr_destination, tfr_annual_accrual=tfr_annual_accrual,
         tfr_company_value=tfr_company_value, tfr_revaluation_rate=tfr_revaluation_rate,
-        couple_net_monthly=couple_net_monthly, couple_stop_working_age=couple_stop_working_age,
     )
     rows = run_projection(**kwargs)
 
@@ -218,8 +214,6 @@ def find_earliest_retirement(
     tfr_annual_accrual: float = 0.0,
     tfr_company_value: float = 0.0,
     tfr_revaluation_rate: float = 0.015,
-    couple_net_monthly: float = 0.0,
-    couple_stop_working_age: int = 0,
     early_pension_years: int = 0,
     defer_to_71: bool = False,
 ) -> int:
@@ -262,7 +256,6 @@ def find_earliest_retirement(
             inps_employee_rate=inps_employee_rate, surcharges_rate=surcharges_rate,
             tfr_destination=tfr_destination, tfr_annual_accrual=tfr_annual_accrual,
             tfr_company_value=tfr_company_value, tfr_revaluation_rate=tfr_revaluation_rate,
-            couple_net_monthly=couple_net_monthly, couple_stop_working_age=couple_stop_working_age,
         )
         rows = run_projection(**kwargs)
 
@@ -309,8 +302,6 @@ def find_optimal_pac(
     tfr_annual_accrual: float = 0.0,
     tfr_company_value: float = 0.0,
     tfr_revaluation_rate: float = 0.015,
-    couple_net_monthly: float = 0.0,
-    couple_stop_working_age: int = 0,
     early_pension_years: int = 0,
     defer_to_71: bool = False,
     **_,
@@ -338,7 +329,6 @@ def find_optimal_pac(
             inps_employee_rate=inps_employee_rate, surcharges_rate=surcharges_rate,
             tfr_destination=tfr_destination, tfr_annual_accrual=tfr_annual_accrual,
             tfr_company_value=tfr_company_value, tfr_revaluation_rate=tfr_revaluation_rate,
-            couple_net_monthly=couple_net_monthly, couple_stop_working_age=couple_stop_working_age,
             early_pension_years=early_pension_years, defer_to_71=defer_to_71,
         )
         if test_earliest <= global_earliest_age:

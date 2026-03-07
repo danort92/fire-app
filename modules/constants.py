@@ -40,7 +40,6 @@ DEFAULT_ASSUMPTIONS = {
     "fire_scenario": {"stop_working_age": 50, "part_time": True, "part_time_salary": 900,
                       "part_time_monthly_gross": 0, "part_time_until_age": 60, "safe_withdrawal_rate": 0.035},
     "pension_options": {"early_pension_years": 0, "defer_to_71": False},
-    "couple": {"enabled": False, "partner_net_monthly": 0, "partner_stop_working_age": 0},
     "monte_carlo": {"n_simulations": 1000, "etf_volatility": 0.16, "pension_fund_volatility": 0.05,
                     "inflation_std": 0.01, "scenario": "Hybrid"}
 }
